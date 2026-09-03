@@ -57,6 +57,7 @@ final class SessionLog {
             }
         case .deviceInformation(let info): write("deviceInfo \(info.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: "; "))")
         case .battery(let level): write("battery \(level)%")
+        case .bottleConfig(let config): write("bottleConfig capacity=\(config.capacityML)mL raw=\(config.raw.hexString)")
         case .weight(let sample): write("weight raw=\(sample.raw) hex=\(sample.payload.hexString)")
         case .cap(let state): write("cap \(state.rawValue)")
         case .sip(let record): write("sip pct=\(record.percentOfCapacity) total=\(record.cumulativePercent) pending=\(record.pendingCount) flags=\(record.flags) before=\(record.rawWeightBefore ?? -1) after=\(record.rawWeightAfter ?? -1) raw=\(record.hexString)")

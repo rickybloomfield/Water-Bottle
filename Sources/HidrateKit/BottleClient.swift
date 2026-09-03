@@ -22,11 +22,12 @@ public struct BottleClientOptions: Sendable, Equatable {
     /// Off by default: some firmware drops the link when unusual characteristics are enabled.
     public var subscribeToAllNotifying = false
     /// Read the battery level this often while connected so the link never sits idle.
-    /// Set to nil to disable.
-    public var keepAliveInterval: TimeInterval? = 20
-    /// Poll the weight characteristic by reading it this often. PRO 2 firmware only
-    /// notifies weight every ~15 s, too slow for calibration and drink detection.
-    public var weightPollInterval: TimeInterval? = 3
+    /// Set to nil to disable. Reads are slow on PRO 2 firmware, so keep this sparse.
+    public var keepAliveInterval: TimeInterval? = 60
+    /// Poll the weight characteristic by reading it this often. Off by default: PRO 2
+    /// firmware 100.64 answers a read with a single `00` byte and queues reads for tens of
+    /// seconds, so only the ~15 s notifications carry real values.
+    public var weightPollInterval: TimeInterval? = nil
     /// After connecting, read every readable characteristic once and surface the values
     /// as `rawValue` events. Cheap, and the fastest way to map unfamiliar firmware.
     public var readUnknownCharacteristicsOnConnect = true
@@ -845,6 +846,13 @@ extension HidrateBottleClient: CBPeripheralDelegate {
         case HidrateUUID.weight:
             if let sample = WeightSample(data: data, receivedAt: now) {
                 emit(.weight(sample))
+            } else {
+                emit(.rawValue(CharacteristicValue(uuid: uuid, data: data, receivedAt: now)))
+            }
+        case HidrateUUID.referenceConfig:
+            if let capacity = BottleConfig(data: data) {
+                log(.info, "Bottle-side capacity: \(capacity.capacityML) mL (raw \(data.hexString))")
+                emit(.bottleConfig(capacity))
             } else {
                 emit(.rawValue(CharacteristicValue(uuid: uuid, data: data, receivedAt: now)))
             }

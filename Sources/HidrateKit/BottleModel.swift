@@ -37,6 +37,8 @@ public final class HidrateBottleModel {
     public private(set) var gatt: GATTInventory?
     public private(set) var deviceInformation: [String: String] = [:]
     public private(set) var batteryPercent: Int?
+    /// Capacity configured inside the bottle (what its own sip percentages refer to).
+    public private(set) var bottleCapacityML: Int?
     public private(set) var capState: CapState?
     public private(set) var capChangedAt: Date?
     public private(set) var latestWeight: WeightSample?
@@ -84,7 +86,9 @@ public final class HidrateBottleModel {
         set { filter.requiredSamples = newValue }
     }
 
-    private var filter = StableWeightFilter()
+    // PRO 2 firmware notifies weight every ~15 s and drifts a few units per sample, so two
+    // agreeing samples within ±8 is the practical definition of "settled".
+    private var filter = StableWeightFilter(tolerance: 8, requiredSamples: 2)
     private var tracker = LevelTracker()
     private var stableSubscribers: [UUID: AsyncStream<Int>.Continuation] = [:]
     private var eventTask: Task<Void, Never>?
@@ -201,7 +205,7 @@ public final class HidrateBottleModel {
 
     /// Waits for `samples` consecutive stable readings and returns their mean.
     /// Used by the empty/full calibration steps.
-    public func captureStableRaw(samples: Int = 4, timeout: Duration = .seconds(45)) async throws -> Double {
+    public func captureStableRaw(samples: Int = 3, timeout: Duration = .seconds(120)) async throws -> Double {
         guard isConnected else { throw CaptureError.notConnected }
         filter.reset()
         stableStreak = 0
@@ -255,6 +259,8 @@ public final class HidrateBottleModel {
             deviceInformation = info
         case .battery(let level):
             batteryPercent = level
+        case .bottleConfig(let config):
+            bottleCapacityML = config.capacityML
         case .cap(let state):
             capState = state
             capChangedAt = Date()

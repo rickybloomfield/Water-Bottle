@@ -116,6 +116,8 @@ public enum BottleEvent: Sendable {
     case gatt(GATTInventory)
     case deviceInformation([String: String])
     case battery(Int)
+    /// The bottle's own configuration block (capacity in mL), read from the Reference service.
+    case bottleConfig(BottleConfig)
     case weight(WeightSample)
     case cap(CapState)
     case sip(SipRecord)

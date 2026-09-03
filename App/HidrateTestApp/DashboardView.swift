@@ -42,6 +42,9 @@ struct DashboardView: View {
             if let battery = model.batteryPercent {
                 LabeledContent("Battery", value: "\(battery)%")
             }
+            if let capacity = model.bottleCapacityML {
+                LabeledContent("Bottle-side capacity", value: "\(capacity) mL")
+            }
             if !model.deviceInformation.isEmpty {
                 ForEach(model.deviceInformation.sorted { $0.key < $1.key }, id: \.key) { key, value in
                     LabeledContent(key, value: value)

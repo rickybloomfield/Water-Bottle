@@ -27,7 +27,7 @@ struct CalibrationView: View {
                 }
 
                 Section("Step 1 · Empty") {
-                    Text("Empty and dry the bottle, put the lid on, and stand it on a flat surface. Then capture.")
+                    Text("Empty and dry the bottle, put the lid on, and stand it on a flat surface. Then capture. The PRO 2 reports weight every 15 s, so each capture takes about a minute.")
                         .font(.footnote).foregroundStyle(.secondary)
                     captureRow(step: .empty, value: emptyRaw)
                 }
@@ -113,7 +113,7 @@ struct CalibrationView: View {
         Task {
             defer { capturing = nil }
             do {
-                let raw = try await model.captureStableRaw(samples: 4, timeout: .seconds(45))
+                let raw = try await model.captureStableRaw(samples: 3, timeout: .seconds(120))
                 switch step {
                 case .empty: emptyRaw = raw
                 case .full: fullRaw = raw

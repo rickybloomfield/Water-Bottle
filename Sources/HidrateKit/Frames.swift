@@ -114,6 +114,21 @@ public struct WeightSample: Sendable, Hashable {
     public var lowByte: Int { raw & 0xFF }
 }
 
+/// The 6-byte block on the Reference service's `316C4914…` characteristic. Bytes 0..1 are
+/// the bottle capacity in mL, little-endian (a 21 oz PRO 2 reads `6d 02 00 00 00 00` = 621).
+/// The remaining four bytes were zero on the bottle observed; meaning unknown.
+public struct BottleConfig: Sendable, Hashable {
+    public let capacityML: Int
+    public let raw: Data
+
+    public init?(data: Data) {
+        let bytes = [UInt8](data)
+        guard bytes.count >= 2 else { return nil }
+        capacityML = Int(bytes[0]) | (Int(bytes[1]) << 8)
+        raw = data
+    }
+}
+
 /// Cap open/closed state, notified on the debug characteristic as `81 02 00 00` (open)
 /// and `80 02 00 00` (closed). Bit 0 of byte 0 is the flag.
 public enum CapState: String, Sendable, Hashable {

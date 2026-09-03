@@ -72,9 +72,40 @@ Read from Ricky's bottle `h2o00008823` on 2026-09-03 (Device Information: manufa
 
 Absent: Nordic DFU (`FE59`), Nordic UART, Environmental Sensing, accelerometer characteristics.
 
-Open questions being logged by the app: whether `0x57` on Data Point returns records on
-this firmware (the first drain got no reply), what Set Point notifies, and what
-`2007A063`, the `3BBD…` channels and the `6AA5…` block contain.
+### PRO 2 values read on 2026-09-03
+
+| Characteristic | Value | Decoded |
+|---|---|---|
+| `316C4914` (Reference) | `6d 02 00 00 00 00` | **Bottle capacity 621 mL** (LE u16) + 4 unknown zero bytes. Written by the official app; the sip percent field is relative to it. |
+| `6AA50001` | `03 a9 90 8a 53 48 48 1a` | Unknown id (address?). |
+| `6AA50002` | `"HidrateSmart LLC"` padded to 64 | Manufacturer string. |
+| `6AA50003` | `"HidrateSpark PRO 2"` padded to 64 | Product string. |
+| `6AA50005` | `9c 00 00 00 00 00 00 00` | Unknown (156). |
+| `6AA50006` | `0b 00 00 00` | Unknown (11). |
+| `6AA50007` | `00 40 64 00` | Firmware 100.64.0 as bytes (`0x64`=100, `0x40`=64, 0). |
+| `6AA50008` | `00 00 01 00` | Hardware version 1.0? (`Sensor-SM-V1`). |
+| `6AA50009` / `…000A` | `02` / `00` | Unknown. |
+| `2A07` Tx Power | `08` | +8 dBm. |
+| Telink OTA `…2B12` | `00` | Idle. |
+| `3BBD83E2`, `3BBD83F2` | `00` | Idle. |
+| LED state `B810E826` | `00 00 00 00` | Off. |
+| Weight `1807A063` (read) | `00` | **Reads return a single zero byte**; only notifications carry the value. |
+| Sensor 2 `2007A063` (read) | `00` | Same. |
+| Debug `E3578B0D` (read) | `80 02 00 00` | Cap closed; the read returns the same frame as the notification. |
+| Data Point after `0x57` | all zeros | Empty queue marker, so the legacy drain protocol is alive on this firmware. |
+
+Behavioural notes on 100.64.0:
+
+* **GATT reads are slow.** A batch of 18 reads issued right after connecting was answered
+  ~40 s later, then at ~180 ms spacing. The bottle appears to service ATT requests only when
+  it wakes, so keep reads to a minimum and never poll.
+* **Weight notifies every 15 s** regardless of activity (observed cadence 15.0 s).
+* The raw weight value drifted downward at ~15 units/min for at least seven minutes after the
+  bottle was unplugged from its charger (24990 → 24891) while apparently standing still.
+  Whether this is thermal recovery or a property of the sensor is still being measured;
+  drink detection must not be trusted until it is understood.
+* Open questions: what a sip looks like on this firmware, what Set Point notifies, and what
+  `2007A063` and the `3BBD…` channels do.
 
 ## Handshake (required before sip records flow)
 

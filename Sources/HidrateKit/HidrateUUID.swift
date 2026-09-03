@@ -71,7 +71,7 @@ public enum HidrateUUID {
     public static let telinkOTA = "00010203-0405-0607-0809-0A0B0C0D2B12"
     /// PRO 2: second sensor characteristic next to weight (read, notify). Meaning unknown.
     public static let sensorSecondary = "2007A063-4E2D-4636-981A-35E93D1C7B94"
-    /// Reference service: 6 bytes read/write, contents unknown.
+    /// Reference service: 6 bytes read/write; bytes 0..1 = bottle capacity in mL (LE).
     public static let referenceConfig = "316C4914-1F59-462E-AF06-185418674C0C"
     /// LED service: state read-back.
     public static let ledState = "B810E826-CF05-4B46-A725-07BC0FA2E5D9"
@@ -138,13 +138,19 @@ public enum HidrateUUID {
             commandB1: "Command B1 (write)",
             commandB2: "Command B2 (read/write)",
             sensorSecondary: "Sensor 2 (unknown)",
-            referenceConfig: "Reference Config (6 bytes)",
+            referenceConfig: "Bottle Config (capacity mL)",
             ledState: "LED State",
             txPowerService: "Tx Power",
             txPowerLevel: "Tx Power Level",
         ]
+        let vendorNames = [
+            1: "Vendor Info 1 (id / address?)", 2: "Vendor Info 2 (manufacturer string)",
+            3: "Vendor Info 3 (product string)", 5: "Vendor Info 5", 6: "Vendor Info 6",
+            7: "Vendor Info 7 (firmware version bytes)", 8: "Vendor Info 8 (hardware version?)",
+            9: "Vendor Info 9", 10: "Vendor Info 10",
+        ]
         for i in 1...10 {
-            table[String(format: "6AA5%04X-6352-4D57-A7B4-003A416FBB0B", i)] = "Vendor Info \(i)"
+            table[String(format: "6AA5%04X-6352-4D57-A7B4-003A416FBB0B", i)] = vendorNames[i] ?? "Vendor Info \(i)"
         }
         table = Dictionary(uniqueKeysWithValues: table.map { (normalize($0.key), $0.value) })
         return table

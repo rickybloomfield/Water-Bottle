@@ -58,6 +58,8 @@ func printEvent(_ event: BottleEvent, quiet: Bool) {
         print("[\(stamp())] device info: \(info.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ", "))")
     case .battery(let level):
         print("[\(stamp())] battery \(level)%")
+    case .bottleConfig(let config):
+        print("[\(stamp())] bottle capacity \(config.capacityML) mL (raw \(config.raw.hexString))")
     case .weight(let sample):
         print("[\(stamp())] weight raw=\(sample.raw) (0x\(String(sample.raw, radix: 16))) hi=\(sample.highByte) lo=\(sample.lowByte)")
     case .cap(let state):

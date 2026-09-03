@@ -34,7 +34,7 @@ struct SettingsView: View {
                     Stepper(value: config.noiseML, in: 1...20, step: 1) {
                         LabeledContent("Noise band", value: Format.ml(config.wrappedValue.noiseML))
                     }
-                    Stepper(value: Binding(get: { app.model.stabilitySamples }, set: { app.model.stabilitySamples = $0 }), in: 2...10) {
+                    Stepper(value: Binding(get: { app.model.stabilitySamples }, set: { app.model.stabilitySamples = $0 }), in: 1...10) {
                         LabeledContent("Stable samples", value: "\(app.model.stabilitySamples)")
                     }
                     Stepper(value: Binding(get: { app.model.stabilityTolerance }, set: { app.model.stabilityTolerance = $0 }), in: 1...20) {
