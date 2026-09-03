@@ -272,8 +272,18 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
             return
         }
         guard let found = central.retrievePeripherals(withIdentifiers: [id]).first else {
-            log(.error, "Peripheral \(id) is not known to this device yet; scan first")
-            state = .disconnected(reason: "unknown peripheral")
+            // The saved identifier is stale (the bottle rotates its BLE address). Search for
+            // it by name/service instead of giving up, and connect when it advertises.
+            if _options.rescanWhileConnecting, targetName != nil || lastBottleName != nil {
+                if targetName == nil { targetName = lastBottleName }
+                state = .connecting
+                connectAttemptStarted = Date()
+                log(.info, "Saved address is stale; scanning for \(targetName ?? "the bottle") by name")
+                startReconnectScan()
+            } else {
+                log(.error, "Peripheral \(id) is not known yet; scan first")
+                state = .disconnected(reason: "unknown peripheral")
+            }
             return
         }
         central.stopScan()
