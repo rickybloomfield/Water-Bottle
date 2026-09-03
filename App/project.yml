@@ -1,0 +1,49 @@
+name: HidrateTestApp
+options:
+  bundleIdPrefix: com.rickybloomfield
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  xcodeVersion: "26.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    DEVELOPMENT_TEAM: R26GJ8D22R
+    CODE_SIGN_STYLE: Automatic
+packages:
+  HidrateKit:
+    path: ..
+targets:
+  HidrateTestApp:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: HidrateTestApp
+    dependencies:
+      - package: HidrateKit
+        product: HidrateKit
+    entitlements:
+      path: HidrateTestApp/HidrateTestApp.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.access: []
+    info:
+      path: HidrateTestApp/Info.plist
+      properties:
+        CFBundleDisplayName: Hidrate Test
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        NSBluetoothAlwaysUsageDescription: Connects to your HidrateSpark bottle to read its water level and sips.
+        NSHealthShareUsageDescription: Reads today's water intake so the app can show your total.
+        NSHealthUpdateUsageDescription: Logs the water you drink from the bottle as water intake.
+        UIBackgroundModes: [bluetooth-central]
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rickybloomfield.HidrateTestApp
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_STRICT_CONCURRENCY: complete
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
