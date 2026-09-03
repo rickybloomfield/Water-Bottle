@@ -138,6 +138,12 @@ app's full initialisation. Ours was too sparse, and we used the wrong sip bytes.
   channel (`3BBD83E2…`). `HidrateBottleClient` replays this verbatim, regenerating only the
   time, when it detects a PRO 2 (presence of the command-A channel).
 * Custom firmware is therefore **not required** to read intake from a PRO 2.
+* **This 21 oz chug-lid unit has no lid sensor.** Only cap "closed" is ever reported and the
+  bottle never queues a sip record for a third party, so intake is **weight-only** in
+  practice. With the full init (2 s weight) and a fresh calibration this is reliable: 50 mL
+  and 41 mL drinks were detected and logged on 2026-09-03.
+* **LED is host-driven**: write one byte to LED control `A1D9A5BF…`. The official app wrote
+  `b0` and `47`; the code for a blue drink-confirmation glow is not yet identified.
 
 ## Handshake (required before sip records flow)
 

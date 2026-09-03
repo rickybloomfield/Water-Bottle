@@ -6,6 +6,7 @@ struct ExploreView: View {
     @State private var writeUUID = HidrateUUID.ledControl
     @State private var writeHex = "02"
     @State private var minimumLevel: LogLevel = .debug
+    @State private var ledSweep = 0.0
 
     private var model: HidrateBottleModel { app.model }
 
@@ -13,6 +14,7 @@ struct ExploreView: View {
         NavigationStack {
             List {
                 gattSection
+                ledSweepSection
                 rawSection
                 writeSection
                 logSection
@@ -86,6 +88,26 @@ struct ExploreView: View {
                     Text(Format.time.string(from: value.receivedAt)).font(.caption2).foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+
+    private var ledSweepSection: some View {
+        Section("LED sweeper (find blue)") {
+            HStack {
+                Text(String(format: "Byte 0x%02X (%d)", Int(ledSweep), Int(ledSweep)))
+                Spacer()
+                Button("Send") { model.client.setLED(rawByte: UInt8(Int(ledSweep) & 0xFF)) }
+                    .buttonStyle(.bordered)
+                    .disabled(!model.isConnected)
+            }
+            Slider(value: $ledSweep, in: 0...255, step: 1) {
+                Text("LED byte")
+            } minimumValueLabel: { Text("0") } maximumValueLabel: { Text("255") }
+            .onChange(of: ledSweep) { _, v in
+                if model.isConnected { model.client.setLED(rawByte: UInt8(Int(v) & 0xFF)) }
+            }
+            Text("Drag slowly and watch the bottle. When it glows blue, note the byte and set it in Settings → Feedback.")
+                .font(.footnote).foregroundStyle(.secondary)
         }
     }
 

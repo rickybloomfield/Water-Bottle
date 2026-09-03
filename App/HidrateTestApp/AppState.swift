@@ -73,6 +73,9 @@ final class AppState {
         }
     }
 
+    var flashLEDOnDrink: Bool { didSet { defaults.set(flashLEDOnDrink, forKey: Keys.flashLED) } }
+    var drinkLEDByte: Int { didSet { defaults.set(drinkLEDByte, forKey: Keys.ledByte) } }
+
     var handshakeMode: BottleClientOptions.HandshakeMode {
         didSet {
             defaults.set(handshakeMode.rawValue, forKey: Keys.handshake)
@@ -97,6 +100,8 @@ final class AppState {
         static let handshake = "app.handshakeMode"
         static let exploreAll = "app.exploreAllCharacteristics"
         static let readUnknown = "app.readUnknownOnConnect"
+        static let flashLED = "app.flashLEDOnDrink"
+        static let ledByte = "app.drinkLEDByte"
         static let tracker = "app.trackerConfiguration"
     }
 
@@ -113,6 +118,8 @@ final class AppState {
         let readUnknown = UserDefaults.standard.object(forKey: Keys.readUnknown) as? Bool ?? true
         options.readUnknownCharacteristicsOnConnect = readUnknown
         readUnknownOnConnect = readUnknown
+        flashLEDOnDrink = defaults.object(forKey: Keys.flashLED) as? Bool ?? true
+        drinkLEDByte = defaults.object(forKey: Keys.ledByte) as? Int ?? 0x02
         model = HidrateBottleModel(client: HidrateBottleClient(options: options))
 
         autoLogToHealth = defaults.object(forKey: Keys.autoLog) as? Bool ?? true
@@ -187,6 +194,9 @@ final class AppState {
 
     private func add(_ entry: IntakeEntry) {
         sessionLog.write("intake \(Int(entry.volumeML))mL source=\(entry.source.rawValue) autoLog=\(autoLogToHealth && entry.volumeML >= minimumLogML)")
+        if flashLEDOnDrink, entry.source != .manual, model.isConnected {
+            model.client.setLED(rawByte: UInt8(drinkLEDByte & 0xFF))
+        }
         entries.insert(entry, at: 0)
         if entries.count > 2000 { entries.removeLast(entries.count - 2000) }
         if autoLogToHealth, entry.volumeML >= minimumLogML {

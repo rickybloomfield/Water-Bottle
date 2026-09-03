@@ -8,6 +8,17 @@ struct SettingsView: View {
         @Bindable var app = app
         NavigationStack {
             Form {
+                Section("Feedback") {
+                    Toggle("Flash bottle LED on drink", isOn: $app.flashLEDOnDrink)
+                    Stepper(value: $app.drinkLEDByte, in: 0...255) {
+                        LabeledContent("LED byte", value: String(format: "0x%02X (%d)", app.drinkLEDByte, app.drinkLEDByte))
+                    }
+                    Button("Test this LED byte") { app.model.client.setLED(rawByte: UInt8(app.drinkLEDByte & 0xFF)) }
+                        .disabled(!app.model.isConnected)
+                    Text("The PRO 2 LED code for blue is not yet known. Use the LED sweeper in the Explore tab to find it, then set it here.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+
                 Section("Intake logging") {
                     Picker("Source", selection: $app.intakeSource) {
                         ForEach(IntakeSource.allCases) { Text($0.title).tag($0) }
