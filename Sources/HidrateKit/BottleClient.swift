@@ -74,6 +74,8 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     private var services: [String] = []
     private var pendingCharacteristicDiscoveries = 0
     private var sessionActive = false  // true from didConnect until disconnect; blocks duplicate discovery
+    private var discoveryWatchdog: DispatchSourceTimer?
+    private var discoveryStartedAt: Date?
     private var wantsConnection = false
     private var scanRequested = false
     private var targetIdentifier: UUID?
@@ -229,7 +231,15 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     public func nudgeReconnect() {
         queue.async {
             guard self.wantsConnection, self.central.state == .poweredOn else { return }
-            if self.sessionActive { return }
+            if self.sessionActive {
+                // If a restored session is wedged in discovery, break it.
+                if case .discoveringServices = self.state,
+                   let since = self.discoveryStartedAt, Date().timeIntervalSince(since) > 6 {
+                    self.log(.info, "Foreground nudge: discovery wedged, forcing reconnect")
+                    self.forceReconnect()
+                }
+                return
+            }
             let pendingFor = self.connectAttemptStarted.map { Date().timeIntervalSince($0) } ?? .infinity
             if let pending = self.peripheral, pending.state == .connecting {
                 if pendingFor > 20 {
@@ -555,6 +565,8 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         cancelHandshake()
         stopKeepAlive()
         cancelReconnectScan()
+        discoveryWatchdog?.cancel()
+        discoveryWatchdog = nil
         characteristics = [:]
         services = []
         pendingCharacteristicDiscoveries = 0
@@ -572,6 +584,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     }
 
     private func finishDiscovery() {
+        discoveryWatchdog?.cancel(); discoveryWatchdog = nil
         let inventory = GATTInventory(
             services: services,
             characteristics: characteristics.values.map {
@@ -823,7 +836,38 @@ extension HidrateBottleClient: CBCentralManagerDelegate {
         sessionActive = true
         resetSessionState()
         state = .discoveringServices
+        discoveryStartedAt = Date()
         peripheral.discoverServices(nil)
+        startDiscoveryWatchdog()
+    }
+
+    // CoreBluetooth can hand back a "connected" peripheral (via state restoration or a
+    // terminate-existing relaunch) whose link is actually gone, so discoverServices never
+    // replies and there is no disconnect callback. Recover by forcing a clean reconnect.
+    private func startDiscoveryWatchdog() {
+        discoveryWatchdog?.cancel()
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 8)
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            if case .discoveringServices = self.state {
+                self.log(.warning, "Service discovery stalled; forcing a clean reconnect")
+                self.forceReconnect()
+            }
+        }
+        timer.resume()
+        discoveryWatchdog = timer
+    }
+
+    private func forceReconnect() {
+        discoveryWatchdog?.cancel(); discoveryWatchdog = nil
+        sessionActive = false
+        let stale = peripheral
+        resetSessionState()
+        if let stale { central.cancelPeripheralConnection(stale) }
+        state = .connecting
+        connectAttemptStarted = Date()
+        queue.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.attemptConnection() }
     }
 
     public func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
