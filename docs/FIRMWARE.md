@@ -29,6 +29,16 @@
    (connect, sync, use a modest connection interval, disconnect when idle or keep one
    quiet link) usually makes the problem disappear without touching the puck.
 
+## A concrete firmware defect worth fixing
+
+The PRO 2 puck changes its Bluetooth device address between sessions without offering a
+bond (see PROTOCOL.md). Address rotation is a privacy feature, but it is only workable
+when the peripheral bonds so the phone can resolve the new address; without that, every
+reconnect needs a full scan, which is exactly the behaviour that keeps the official app
+busy and the iOS Bluetooth stack under load. If custom firmware ever happens, the fix is
+either a random static address that never changes, or LE Secure Connections bonding with a
+resolvable private address. Until then, the SDK works around it by scanning.
+
 ## Recommended order
 
 1. Use `HidrateTestApp` to characterise the current behaviour: firmware revision, GATT

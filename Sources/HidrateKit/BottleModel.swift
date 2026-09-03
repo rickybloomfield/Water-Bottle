@@ -140,11 +140,14 @@ public final class HidrateBottleModel {
 
     public func connect(_ bottle: DiscoveredBottle) {
         connectedBottleName = bottle.name
-        client.connect(to: bottle.id)
+        client.connect(to: bottle.id, name: bottle.name)
     }
 
     @discardableResult
-    public func reconnectLastBottle() -> Bool { client.reconnectLastBottle() }
+    public func reconnectLastBottle() -> Bool {
+        if connectedBottleName == nil { connectedBottleName = client.lastBottleName }
+        return client.reconnectLastBottle()
+    }
 
     public func disconnect() { client.disconnect() }
     public func drainSips() { client.drainSips() }

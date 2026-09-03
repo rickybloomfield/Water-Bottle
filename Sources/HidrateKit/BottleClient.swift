@@ -35,9 +35,11 @@ public struct BottleClientOptions: Sendable, Equatable {
     public var maxIdenticalSipFrames = 5
     /// iOS state-restoration identifier. Requires the `bluetooth-central` background mode.
     public var restoreIdentifier: String? = nil
-    /// While a connect request has been pending this long, scan in parallel and log whether
-    /// the target bottle is advertising at all (foreground only). nil disables it.
-    public var diagnosticScanAfter: TimeInterval? = 10
+    /// While a connect request is pending, also scan for the bottle's advertised service and
+    /// switch to it if it reappears under a new identifier. The bottle changes its Bluetooth
+    /// address (and therefore its CoreBluetooth identifier) from time to time; a connect
+    /// request aimed at the old identity never completes. Strongly recommended.
+    public var rescanWhileConnecting = true
 
     public init() {}
 }
@@ -72,10 +74,11 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     private var deviceInformation: [String: String] = [:]
     private var keepAliveTimer: DispatchSourceTimer?
     private var connectAttemptStarted: Date?
-    private var diagnosticScanTimer: DispatchSourceTimer?
-    private var diagnosticScanActive = false
-    private var lastDiagnosticSighting: Date?
+    private var reconnectScanTimer: DispatchSourceTimer?
+    private var reconnectScanActive = false
+    private var reconnectScanSightings = 0
     private var manualRetryInProgress = false
+    private var targetName: String?
     private var state: ConnectionState = .disconnected(reason: nil) {
         didSet { emit(.connection(state)) }
     }
@@ -85,6 +88,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     private let logger = Logger(subsystem: "HidrateKit", category: "BottleClient")
 
     private static let lastBottleKey = "HidrateKit.lastBottleIdentifier"
+    private static let lastBottleNameKey = "HidrateKit.lastBottleName"
 
     public init(options: BottleClientOptions = BottleClientOptions()) {
         _options = options
@@ -168,11 +172,22 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         UserDefaults.standard.string(forKey: Self.lastBottleKey).flatMap(UUID.init(uuidString:))
     }
 
-    public func connect(to identifier: UUID) {
+    /// The advertised name of the last bottle, used to find it again after an address change.
+    public var lastBottleName: String? {
+        UserDefaults.standard.string(forKey: Self.lastBottleNameKey)
+    }
+
+    public func connect(to identifier: UUID, name: String? = nil) {
         queue.async {
             self.targetIdentifier = identifier
             self.wantsConnection = true
             UserDefaults.standard.set(identifier.uuidString, forKey: Self.lastBottleKey)
+            if let name, !name.isEmpty {
+                self.targetName = name
+                UserDefaults.standard.set(name, forKey: Self.lastBottleNameKey)
+            } else {
+                self.targetName = self.targetName ?? self.lastBottleName
+            }
             if let pending = self.peripheral, pending.identifier == identifier, pending.state == .connecting {
                 // A connect request is already queued with CoreBluetooth. Cancel it and
                 // issue a fresh one so a manual retry has a visible effect.
@@ -197,6 +212,8 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
 
     public func forgetLastBottle() {
         UserDefaults.standard.removeObject(forKey: Self.lastBottleKey)
+        UserDefaults.standard.removeObject(forKey: Self.lastBottleNameKey)
+        queue.async { self.targetName = nil }
     }
 
     public func disconnect() {
@@ -222,50 +239,80 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         emit(.scanning(false))
         peripheral = found
         found.delegate = self
+        if targetName == nil, let name = found.name, !name.isEmpty {
+            targetName = name
+            UserDefaults.standard.set(name, forKey: Self.lastBottleNameKey)
+        }
         state = .connecting
         connectAttemptStarted = Date()
         manualRetryInProgress = false
-        log(.info, "Connecting to \(found.name ?? id.uuidString) (peripheral state \(found.state.rawValue))…")
+        log(.info, "Connecting to \(found.name ?? id.uuidString) [\(id.uuidString.prefix(8))] (peripheral state \(found.state.rawValue))…")
         central.connect(found, options: connectOptions)
-        scheduleDiagnosticScan()
+        startReconnectScan()
     }
 
-    // While a connect is pending, scan and report whether the bottle is even advertising.
-    private func scheduleDiagnosticScan() {
-        cancelDiagnosticScan()
-        guard let delay = _options.diagnosticScanAfter else { return }
-        let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + delay)
-        timer.setEventHandler { [weak self] in
-            guard let self, self.central.state == .poweredOn, self.peripheral?.state == .connecting else { return }
-            self.diagnosticScanActive = true
-            self.lastDiagnosticSighting = nil
-            self.central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
-            self.log(.info, "Still connecting after \(Int(delay))s; scanning to check whether the bottle is advertising")
-            let check = DispatchSource.makeTimerSource(queue: self.queue)
-            check.schedule(deadline: .now() + 15, repeating: 15)
-            check.setEventHandler { [weak self] in
-                guard let self, self.diagnosticScanActive else { return }
-                if let seen = self.lastDiagnosticSighting, Date().timeIntervalSince(seen) < 15 {
-                    self.log(.warning, "Bottle IS advertising but the connect is not completing")
-                } else {
-                    self.log(.warning, "Bottle not seen advertising in the last 15s (asleep, charging, or held by another central)")
-                }
+    // While a connect is pending, scan for the bottle's advertised service so we notice
+    // when it comes back under a new identifier (address change) and connect to that.
+    private func startReconnectScan() {
+        cancelReconnectScan()
+        guard _options.rescanWhileConnecting, central.state == .poweredOn else { return }
+        reconnectScanActive = true
+        reconnectScanSightings = 0
+        central.scanForPeripherals(
+            withServices: [CBUUID(string: HidrateUUID.referenceService)],
+            options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
+        )
+        let check = DispatchSource.makeTimerSource(queue: queue)
+        check.schedule(deadline: .now() + 20, repeating: 30)
+        check.setEventHandler { [weak self] in
+            guard let self, self.reconnectScanActive else { return }
+            let waited = self.connectAttemptStarted.map { Int(Date().timeIntervalSince($0)) } ?? 0
+            if self.reconnectScanSightings == 0 {
+                self.log(.warning, "Bottle not seen advertising for \(waited)s (asleep, charging, or held by another central)")
+            } else {
+                self.log(.warning, "Bottle is advertising but the connect has not completed after \(waited)s")
             }
-            check.resume()
-            self.diagnosticScanTimer = check
         }
-        timer.resume()
-        diagnosticScanTimer = timer
+        check.resume()
+        reconnectScanTimer = check
     }
 
-    private func cancelDiagnosticScan() {
-        diagnosticScanTimer?.cancel()
-        diagnosticScanTimer = nil
-        if diagnosticScanActive {
-            diagnosticScanActive = false
+    private func cancelReconnectScan() {
+        reconnectScanTimer?.cancel()
+        reconnectScanTimer = nil
+        if reconnectScanActive {
+            reconnectScanActive = false
             if central.state == .poweredOn { central.stopScan() }
         }
+    }
+
+    /// Called from the scan callback while a connect is pending.
+    private func handleReconnectSighting(_ found: CBPeripheral, name: String, rssi: Int) {
+        let matchesIdentifier = found.identifier == targetIdentifier
+        let matchesName = targetName.map { !$0.isEmpty && $0 == name } ?? false
+        guard matchesIdentifier || matchesName else { return }
+        reconnectScanSightings += 1
+        if matchesIdentifier {
+            if reconnectScanSightings == 1 {
+                log(.info, "Target bottle \(name) is advertising (rssi \(rssi)); waiting for iOS to connect")
+            }
+            return
+        }
+        // Same name, different identifier: the bottle's Bluetooth address changed.
+        let old = targetIdentifier?.uuidString.prefix(8) ?? "-"
+        log(.warning, "Bottle \(name) reappeared with a new identifier \(found.identifier.uuidString.prefix(8)) (was \(old)); its Bluetooth address changed. Switching.")
+        if let stale = peripheral, stale.identifier != found.identifier, stale.state == .connecting {
+            manualRetryInProgress = true
+            central.cancelPeripheralConnection(stale)
+        }
+        targetIdentifier = found.identifier
+        UserDefaults.standard.set(found.identifier.uuidString, forKey: Self.lastBottleKey)
+        cancelReconnectScan()
+        peripheral = found
+        found.delegate = self
+        connectAttemptStarted = Date()
+        state = .connecting
+        central.connect(found, options: connectOptions)
     }
 
     private var connectOptions: [String: Any] {
@@ -308,7 +355,6 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         if manualRetryInProgress {
             // Our own cancel of a pending connect; attemptConnection() is already scheduled.
             manualRetryInProgress = false
-            cancelDiagnosticScan()
             log(.debug, "Pending connect cancelled")
             return
         }
@@ -328,6 +374,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
             log(.info, "Re-issuing connect; it completes when the bottle advertises again")
             central.connect(peripheral, options: connectOptions)
         }
+        startReconnectScan()
     }
 
     // MARK: - Commands
@@ -408,7 +455,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     private func resetSessionState() {
         cancelHandshake()
         stopKeepAlive()
-        cancelDiagnosticScan()
+        cancelReconnectScan()
         characteristics = [:]
         services = []
         pendingCharacteristicDiscoveries = 0
@@ -609,6 +656,7 @@ extension HidrateBottleClient: CBCentralManagerDelegate {
         peripheral = first
         first.delegate = self
         targetIdentifier = first.identifier
+        targetName = targetName ?? first.name ?? lastBottleName
         wantsConnection = true
         if first.state == .connected {
             state = .discoveringServices
@@ -630,10 +678,8 @@ extension HidrateBottleClient: CBCentralManagerDelegate {
         ]
         let looksLikeBottle = name.lowercased().hasPrefix(_options.namePrefix.lowercased())
             || advertised.contains { knownServices.contains($0) }
-        if diagnosticScanActive, peripheral.identifier == targetIdentifier {
-            let first = lastDiagnosticSighting == nil
-            lastDiagnosticSighting = Date()
-            if first { log(.info, "Target bottle \(name) is advertising (rssi \(RSSI.intValue), connectable \(advertisementData[CBAdvertisementDataIsConnectable] ?? "?"))") }
+        if reconnectScanActive {
+            handleReconnectSighting(peripheral, name: name, rssi: RSSI.intValue)
         }
         if _options.onlyBottles, !looksLikeBottle { return }
 

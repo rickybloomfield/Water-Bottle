@@ -51,7 +51,7 @@ struct DashboardView: View {
                 Button("Disconnect", role: .destructive) { model.disconnect() }
             } else if model.connectionState == .connecting {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text("Waiting for the bottle to advertise (\(elapsed(at: context.date))). It only advertises when nothing else is connected; make sure the official app is fully closed, and try lifting the bottle or opening the cap.")
+                    Text("Waiting for the bottle to advertise (\(elapsed(at: context.date))). The app is also scanning for it by name in case its Bluetooth address changed. Make sure the official app is fully closed, and try lifting the bottle or opening the cap.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 HStack {

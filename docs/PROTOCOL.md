@@ -17,6 +17,16 @@ Sources: [HydroSync](https://github.com/maxperron/HydroSync) (handshake bytes),
   nothing else can connect. Close the app (or revoke its Bluetooth permission). **verified**
 * The bottle keeps advertising after it has been paired with the official app. No BLE
   bonding is required; all characteristics are open. **verified**
+* Advertisements carry the Reference service UUID `45855422-…`, so a central can scan for
+  that service (this also works from the iOS background). **verified** on a PRO 2
+  (`h2o00008823`, 2026-09-03).
+* **The bottle changes its Bluetooth address.** Observed on 2026-09-03: after a disconnect
+  the PRO 2 came back under a different CoreBluetooth identifier (`3540F042…` became
+  `97E619C6…`). Without bonding, iOS cannot recognise the new address as the same device,
+  so a pending `connect()` to the old identifier never completes. Any client must re-scan
+  by name (`h2o…`) or service and connect to whatever identifier it finds. This is almost
+  certainly why the official app scans constantly and why it feels flaky. `HidrateBottleClient`
+  scans for the service while a connect is pending and switches automatically. **verified**
 
 ## Services and characteristics
 
