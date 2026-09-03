@@ -51,12 +51,14 @@ struct SettingsView: View {
                     Toggle("Subscribe to all characteristics", isOn: $app.exploreAllCharacteristics)
                     Text("Exploration mode: also enables notifications on undecoded characteristics. Leave off if the bottle disconnects shortly after connecting. Applies on the next connection.")
                         .font(.footnote).foregroundStyle(.secondary)
-                    Picker("Handshake", selection: $app.handshakeMode) {
-                        Text("Captured replay (default)").tag(BottleClientOptions.HandshakeMode.capturedReplay)
-                        Text("Computed (real time of day)").tag(BottleClientOptions.HandshakeMode.computed)
+                    Picker("Init", selection: $app.handshakeMode) {
+                        Text("Auto (recommended)").tag(BottleClientOptions.HandshakeMode.auto)
+                        Text("PRO 2 full init").tag(BottleClientOptions.HandshakeMode.pro2)
+                        Text("Older replay").tag(BottleClientOptions.HandshakeMode.capturedReplay)
+                        Text("Computed (older)").tag(BottleClientOptions.HandshakeMode.computed)
                         Text("None").tag(BottleClientOptions.HandshakeMode.none)
                     }
-                    Text("Applies on the next connection. The computed mode sends the current time of day and clears the glow-reminder slots; it is a decoded hypothesis, so watch the log if sips stop arriving.")
+                    Text("Auto detects a PRO 2 (Telink command channel) and replays the official app's full init, which is what makes the bottle stream live weight and emit sip records. Applies on the next connection.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
 

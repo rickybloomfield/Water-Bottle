@@ -43,6 +43,13 @@
    (connect, sync, use a modest connection interval, disconnect when idle or keep one
    quiet link) usually makes the problem disappear without touching the puck.
 
+## Update: custom firmware is not needed for intake
+
+An HCI sniff of the official app (see PROTOCOL.md) showed the PRO 2 streams live weight and
+emits sip records once it receives the app's full init, and that the sip drain byte is
+`0x55`/`0x33`. HidrateKit now replays that init and reads intake directly. Firmware work is
+now optional, for fixing the annoyances below rather than for basic function.
+
 ## A concrete firmware defect worth fixing
 
 The PRO 2 puck drops its connection and changes its Bluetooth device address roughly every

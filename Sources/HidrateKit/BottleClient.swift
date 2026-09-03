@@ -5,17 +5,21 @@ import os
 /// Tunables for `HidrateBottleClient`.
 public struct BottleClientOptions: Sendable, Equatable {
     public enum HandshakeMode: String, Sendable, CaseIterable, Identifiable {
-        /// Replay the bytes captured from the official app (default, proven).
+        /// Detect the bottle and pick the right init automatically (recommended).
+        case auto
+        /// Full PRO 2 init captured from the official app (firmware 100.x).
+        case pro2
+        /// Older Spark/PRO 13-step replay.
         case capturedReplay
-        /// Send the decoded sequence with the real time of day and no reminder slots.
+        /// Decoded older-firmware sequence with the real time of day.
         case computed
-        /// Skip the handshake (the bottle will not deliver sip records).
+        /// Skip the handshake.
         case none
 
         public var id: String { rawValue }
     }
 
-    public var handshake: HandshakeMode = .capturedReplay
+    public var handshake: HandshakeMode = .auto
     /// Write `0x57` automatically after subscribing and after every pending-record frame.
     public var autoDrainSips = true
     /// Subscribe to every notify/indicate characteristic, decoded or not (exploration mode).
@@ -454,7 +458,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
                 self.log(.warning, "No sip characteristic available; cannot drain")
                 return
             }
-            self.write(uuid, Data([0x57]))
+            self.write(uuid, Data([self.sipRequestByte]))
         }
     }
 
@@ -504,6 +508,23 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     private func characteristic(_ uuid: String) -> CBCharacteristic? {
         characteristics[HidrateUUID.normalize(uuid)]
     }
+
+    private func uuid(for target: HandshakeTarget) -> String {
+        switch target {
+        case .debug: HidrateUUID.debug
+        case .setPoint: HidrateUUID.setPoint
+        case .config: HidrateUUID.referenceConfig
+        case .led: HidrateUUID.ledControl
+        case .cmdA1: HidrateUUID.commandA1
+        case .cmdA2: HidrateUUID.commandA2
+        }
+    }
+
+    /// True when this is a PRO 2 (has the command-channel characteristic).
+    private var isPRO2: Bool { characteristic(HidrateUUID.commandA2) != nil }
+    /// Sip request/ack bytes differ by generation: PRO 2 uses 0x55/0x33, older uses 0x57.
+    private var sipRequestByte: UInt8 { isPRO2 ? 0x55 : 0x57 }
+    private var sipAckByte: UInt8? { isPRO2 ? 0x33 : nil }
 
     private func write(_ uuid: String, _ data: Data, withResponse: Bool? = nil) {
         guard let peripheral, let c = characteristic(uuid) else {
@@ -574,21 +595,21 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
             }
         }
 
+        var mode = _options.handshake
+        if mode == .auto { mode = isPRO2 ? .pro2 : .capturedReplay }
         let steps: [HandshakeStep]?
-        switch _options.handshake {
+        switch mode {
+        case .pro2: steps = HidrateHandshake.pro2()
         case .capturedReplay: steps = HidrateHandshake.capturedReplay
         case .computed: steps = HidrateHandshake.computed()
-        case .none: steps = nil
+        case .auto, .none: steps = nil
         }
 
-        if let steps {
-            if characteristic(HidrateUUID.debug) != nil, characteristic(HidrateUUID.setPoint) != nil {
-                state = .handshaking
-                log(.info, "Sending \(steps.count)-step handshake (\(_options.handshake.rawValue))")
-                runHandshake(steps) { [weak self] in self?.subscribeToStreams() }
-                return
-            }
-            log(.warning, "Debug/Set Point characteristics missing; skipping handshake")
+        if let steps, characteristic(HidrateUUID.setPoint) != nil {
+            state = .handshaking
+            log(.info, "Sending \(steps.count)-step \(mode.rawValue) init")
+            runHandshake(steps) { [weak self] in self?.subscribeToStreams() }
+            return
         }
         subscribeToStreams()
     }
@@ -600,8 +621,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         for (index, step) in steps.enumerated() {
             let item = DispatchWorkItem { [weak self] in
                 guard let self else { return }
-                let uuid = step.target == .debug ? HidrateUUID.debug : HidrateUUID.setPoint
-                self.write(uuid, step.payload)
+                self.write(self.uuid(for: step.target), step.payload)
             }
             handshakeWorkItems.append(item)
             queue.asyncAfter(deadline: .now() + .nanoseconds(Int(delayNanos) * index), execute: item)
@@ -668,11 +688,13 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         if hex == lastSipFrameHex { sipFrameRepeat += 1 } else { sipFrameRepeat = 0 }
         lastSipFrameHex = hex
 
-        if _options.autoDrainSips {
+        if _options.autoDrainSips, let uuid = dataCharacteristicUUID {
             if sipFrameRepeat >= _options.maxIdenticalSipFrames {
                 log(.warning, "Sip frame repeated \(sipFrameRepeat + 1)×; pausing auto-drain: \(hex)")
-            } else if let uuid = dataCharacteristicUUID {
-                write(uuid, Data([0x57]))
+            } else {
+                // PRO 2: acknowledge a real record with 0x33, then request the next with 0x55.
+                if record.hasPayload, let ack = sipAckByte { write(uuid, Data([ack])) }
+                write(uuid, Data([sipRequestByte]))
             }
         }
 
@@ -866,7 +888,7 @@ extension HidrateBottleClient: CBPeripheralDelegate {
         log(.debug, "Notifications \(characteristic.isNotifying ? "on" : "off") for \(HidrateUUID.name(for: uuid) ?? uuid)")
         if characteristic.isNotifying, uuid == dataCharacteristicUUID, _options.autoDrainSips, !initialDrainDone {
             initialDrainDone = true
-            write(uuid, Data([0x57]))
+            write(uuid, Data([sipRequestByte]))
             if characteristic.properties.contains(.read) {
                 queue.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                     guard let self, let peripheral = self.peripheral, let c = self.characteristic(uuid) else { return }

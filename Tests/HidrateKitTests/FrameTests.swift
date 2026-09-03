@@ -121,6 +121,20 @@ struct HandshakeTests {
         #expect(steps.filter { $0.target == .debug }.count == 2)
     }
 
+    @Test func pro2InitIsIntactWithLiveTime() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let date = calendar.date(from: DateComponents(year: 2026, month: 9, day: 3, hour: 10, minute: 50, second: 0))!
+        let steps = HidrateHandshake.pro2(date: date, calendar: calendar)
+        #expect(steps.count == 76)
+        #expect(steps.first?.target == .config)
+        #expect(steps.first?.payload.hexString == "6d02")
+        // The 0x77 time-of-day frame is regenerated: 10:50:00 = 39000 s = 0x9858.
+        let timeStep = try #require(steps.first { $0.payload.first == 0x77 })
+        #expect(timeStep.payload.hexString == "7700000058980000")
+        #expect(steps.contains { $0.target == .cmdA2 })
+    }
+
     @Test func evenlySpacedRemindersMatchCaptureShape() {
         let slots = HidrateHandshake.evenlySpacedReminders(from: 31200, to: 73200, goal: 220)
         #expect(slots.count == 8)

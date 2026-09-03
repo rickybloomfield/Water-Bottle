@@ -113,8 +113,31 @@ Behavioural notes on 100.64.0:
   5 min). Consistent with the puck cooling; not yet seen to flatten within a 10 minute
   window. The tracker adopts drift between slow samples and only measures across handling
   episodes, but the displayed absolute level will wander until this is understood.
-* Open questions: what a sip looks like on this firmware, what Set Point notifies, and what
-  `2007A063` and the `3BBD…` channels do.
+### What the official app does (from an HCI sniff, 2026-09-03)
+
+An iPhone HCI capture of the official app talking to this PRO 2 settled every open question.
+The bottle stays in a 15 s idle weight mode and yields no sip records until it receives the
+app's full initialisation. Ours was too sparse, and we used the wrong sip bytes.
+
+* **Sip drain is `0x55`, not `0x57`.** After a real record the app writes `0x33` to
+  acknowledge, then `0x55` for the next; the queue ends with an all-zero frame. Writing
+  `0x57` (older firmware) does nothing here, which is why our queue always read empty.
+* **Streams arrive as ATT indications** on weight, cap/debug, sensor-2 and the data point.
+* **Weight becomes live and ~2 s after the full init.** Idle it still backs off to 15 s.
+  During handling it swings widely and settles to the new resting value, e.g. picked up
+  `0x57a3`, set down `0x5ddd`, after a drink `0x5c91`.
+* **A real sip record** (the 36% drink): `01 24 33 01 00000000 685ad45d d45d915c 00000000`
+  — pending 1, `0x24`=36% of 621 mL ≈ 224 mL, cumulative `0x0133`, weight-before `0x5dd4`,
+  weight-after `0x5c91`. Same field layout the SipRecord parser already used.
+* **The init** (76 writes, replayed by `HidrateHandshake.pro2()`): write capacity to the
+  config characteristic (`6d02`); `0x07` to command-A control; an LED byte; Set Point
+  opcodes `93 3d`, `9f`, `9c`; Debug commands `2201a3`, `2101xx`, `b1`, `b3`, `40`, `41`;
+  the time of day (`77 00 00 00` + LE u32 seconds since midnight); Set Point `0xa0`; a full
+  glow-reminder table (`nn 34` + target LE u16 + time LE u32 + `0100`, slots `00`–`0d`, then
+  cleared slots up to `0x30`); and a protobuf goal/schedule blob to the command-A data
+  channel (`3BBD83E2…`). `HidrateBottleClient` replays this verbatim, regenerating only the
+  time, when it detects a PRO 2 (presence of the command-A channel).
+* Custom firmware is therefore **not required** to read intake from a PRO 2.
 
 ## Handshake (required before sip records flow)
 

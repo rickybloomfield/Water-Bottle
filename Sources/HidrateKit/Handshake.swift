@@ -4,6 +4,13 @@ import Foundation
 public enum HandshakeTarget: String, Sendable {
     case debug
     case setPoint
+    /// Reference-service config characteristic (`316C4914…`); carries bottle capacity.
+    case config
+    case led
+    /// PRO 2 command channel A, control (`3BBD83E1…`).
+    case cmdA1
+    /// PRO 2 command channel A, data (`3BBD83E2…`); carries the protobuf goal/schedule.
+    case cmdA2
 }
 
 /// One write in the connection handshake.

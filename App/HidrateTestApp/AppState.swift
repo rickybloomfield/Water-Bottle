@@ -104,7 +104,7 @@ final class AppState {
         var options = BottleClientOptions()
         options.restoreIdentifier = "com.rickybloomfield.HidrateTestApp.central"
         let storedHandshake = UserDefaults.standard.string(forKey: Keys.handshake)
-            .flatMap(BottleClientOptions.HandshakeMode.init(rawValue:)) ?? .capturedReplay
+            .flatMap(BottleClientOptions.HandshakeMode.init(rawValue:)) ?? .auto
         options.handshake = storedHandshake
         handshakeMode = storedHandshake
         let exploreAll = UserDefaults.standard.bool(forKey: Keys.exploreAll)
