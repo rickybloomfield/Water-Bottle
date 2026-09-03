@@ -706,6 +706,7 @@ extension HidrateBottleClient: CBCentralManagerDelegate {
         first.delegate = self
         targetIdentifier = first.identifier
         targetName = targetName ?? first.name ?? lastBottleName
+        if let name = targetName { UserDefaults.standard.set(name, forKey: Self.lastBottleNameKey) }
         wantsConnection = true
         // Do not talk to the peripheral yet: this callback arrives before the central
         // reports poweredOn, and requests made before that are dropped silently.

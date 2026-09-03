@@ -46,13 +46,10 @@ struct CalibrationView: View {
                         if !candidate.isValid {
                             Label("Full must read higher than empty. Re-capture.", systemImage: "xmark.octagon").foregroundStyle(.red)
                         } else if !candidate.looksReasonable {
-                            Label("Scale is far from the expected ~1.3 raw/mL. One capture was probably taken while the bottle was lifted.", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                            Label("Scale is outside the expected 0.5–3 raw/mL range. One capture was probably taken while the bottle was tilted.", systemImage: "exclamationmark.triangle").foregroundStyle(.orange)
+                        } else {
+                            Label("Saved automatically", systemImage: "checkmark.circle").foregroundStyle(.green)
                         }
-                        Button("Save calibration") {
-                            app.saveCalibration(emptyRaw: emptyRaw, fullRaw: fullRaw)
-                            message = "Calibration saved."
-                        }
-                        .disabled(!candidate.isValid)
                     } else {
                         Text("Capture both steps to compute the calibration.").foregroundStyle(.secondary)
                     }
@@ -118,6 +115,16 @@ struct CalibrationView: View {
                 switch step {
                 case .empty: emptyRaw = raw
                 case .full: fullRaw = raw
+                }
+                // Save as soon as both points exist and make sense; no extra tap required.
+                if let emptyRaw, let fullRaw {
+                    let candidate = BottleCalibration(emptyRaw: emptyRaw, fullRaw: fullRaw, capacityML: app.capacityML)
+                    if candidate.isValid {
+                        app.saveCalibration(emptyRaw: emptyRaw, fullRaw: fullRaw)
+                        message = String(format: "Calibration saved: %.0f mL over %.0f raw units (%.2f raw/mL).", candidate.capacityML, candidate.rawSpan, candidate.rawUnitsPerML)
+                    } else {
+                        message = "Full reads lower than empty; re-capture the full bottle."
+                    }
                 }
             } catch {
                 message = error.localizedDescription
