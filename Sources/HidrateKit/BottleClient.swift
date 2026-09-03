@@ -69,6 +69,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     private var characteristics: [String: CBCharacteristic] = [:]
     private var services: [String] = []
     private var pendingCharacteristicDiscoveries = 0
+    private var sessionActive = false  // true from didConnect until disconnect; blocks duplicate discovery
     private var wantsConnection = false
     private var scanRequested = false
     private var targetIdentifier: UUID?
@@ -238,6 +239,11 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
 
     private func attemptConnection() {
         guard central.state == .poweredOn, let id = targetIdentifier else { return }
+        // Already connected to this peripheral? Don't reconnect; just make sure a session is running.
+        if let existing = peripheral, existing.identifier == id, existing.state == .connected {
+            beginSession(with: existing)
+            return
+        }
         guard let found = central.retrievePeripherals(withIdentifiers: [id]).first else {
             log(.error, "Peripheral \(id) is not known to this device yet; scan first")
             state = .disconnected(reason: "unknown peripheral")
@@ -390,6 +396,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     }
 
     private func handleDisconnect(_ peripheral: CBPeripheral, error: Error?, isReconnecting: Bool) {
+        sessionActive = false
         if manualRetryInProgress {
             // Our own cancel of a pending connect; attemptConnection() is already scheduled.
             manualRetryInProgress = false
@@ -680,15 +687,14 @@ extension HidrateBottleClient: CBCentralManagerDelegate {
                 startScanning()
             }
             if let restored = peripheral, restored.state == .connected {
-                log(.info, "Restored connection to \(restored.name ?? "bottle"); discovering services")
-                resetSessionState()
-                state = .discoveringServices
-                restored.discoverServices(nil)
+                log(.info, "Restored connection to \(restored.name ?? "bottle")")
+                beginSession(with: restored)
             } else if wantsConnection {
                 attemptConnection()
             }
         case .poweredOff, .unauthorized, .unsupported:
             if peripheral != nil || state.isConnected {
+                sessionActive = false
                 resetSessionState()
                 peripheral = nil
                 state = .disconnected(reason: "Bluetooth \(Self.describe(central.state))")
@@ -710,10 +716,7 @@ extension HidrateBottleClient: CBCentralManagerDelegate {
         wantsConnection = true
         // Do not talk to the peripheral yet: this callback arrives before the central
         // reports poweredOn, and requests made before that are dropped silently.
-        // centralManagerDidUpdateState picks the connected peripheral up.
-        if first.state == .connected {
-            state = .discoveringServices
-        }
+        // centralManagerDidUpdateState begins the session once powered on.
     }
 
     public func centralManager(
@@ -749,6 +752,20 @@ extension HidrateBottleClient: CBCentralManagerDelegate {
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         let waited = connectAttemptStarted.map { String(format: " after %.1fs", Date().timeIntervalSince($0)) } ?? ""
         log(.info, "Connected to \(peripheral.name ?? peripheral.identifier.uuidString)\(waited)")
+        beginSession(with: peripheral)
+    }
+
+    /// Start service discovery for a freshly connected (or restored) peripheral exactly once.
+    /// Restoration, the app's own reconnect call and the powered-on handler can all fire for
+    /// the same connection; this collapses them into a single discovery + handshake.
+    private func beginSession(with peripheral: CBPeripheral) {
+        if sessionActive {
+            log(.debug, "Session already active; ignoring duplicate connect")
+            return
+        }
+        self.peripheral = peripheral
+        peripheral.delegate = self
+        sessionActive = true
         resetSessionState()
         state = .discoveringServices
         peripheral.discoverServices(nil)
@@ -786,6 +803,10 @@ extension HidrateBottleClient: CBPeripheralDelegate {
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         if let error {
             log(.error, "Service discovery failed: \(error.localizedDescription)")
+            return
+        }
+        guard case .discoveringServices = state else {
+            log(.debug, "Ignoring service-discovery callback outside discovery state")
             return
         }
         let found = peripheral.services ?? []

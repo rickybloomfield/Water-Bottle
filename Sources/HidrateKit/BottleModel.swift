@@ -150,6 +150,10 @@ public final class HidrateBottleModel {
     @discardableResult
     public func reconnectLastBottle() -> Bool {
         if connectedBottleName == nil { connectedBottleName = client.lastBottleName }
+        // If a connection or attempt is already in flight (e.g. iOS state restoration),
+        // don't stack another connect on top of it.
+        if connectionState.isConnected { return true }
+        if case .connecting = connectionState { return true }
         return client.reconnectLastBottle()
     }
 
