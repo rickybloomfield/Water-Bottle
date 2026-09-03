@@ -8,10 +8,11 @@ import Foundation
 extension HidrateHandshake {
     /// Full PRO 2 initialisation, in order. Replayed ~50 ms apart.
     public static func pro2(date: Date = Date(), calendar: Calendar = .current) -> [HandshakeStep] {
+        // The official app's two cosmetic LED writes (blue-loop 0xb0, red 0x47) are
+        // intentionally omitted so the bottle doesn't blink on every connect/reconnect.
         var steps: [HandshakeStep] = []
         steps.append(.init(.config, hex: "6d02", note: ""))
         steps.append(.init(.cmdA1, hex: "07", note: ""))
-        steps.append(.init(.led, hex: "b0", note: ""))
         steps.append(.init(.setPoint, hex: "933d", note: ""))
         steps.append(.init(.debug, hex: "2201a3", note: ""))
         steps.append(.init(.debug, hex: "21010f", note: ""))
@@ -84,7 +85,6 @@ extension HidrateHandshake {
         steps.append(.init(.debug, hex: "21010f", note: ""))
         steps.append(.init(.setPoint, hex: "a07062000060350100", note: ""))
         steps.append(.init(.debug, hex: "41", note: ""))
-        steps.append(.init(.led, hex: "47", note: ""))
         return steps
     }
 
