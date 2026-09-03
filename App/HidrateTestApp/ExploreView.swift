@@ -6,7 +6,10 @@ struct ExploreView: View {
     @State private var writeUUID = HidrateUUID.ledControl
     @State private var writeHex = "02"
     @State private var minimumLevel: LogLevel = .debug
-    @State private var ledSweep = 0.0
+    @State private var sweepRunning = false
+    @State private var sweepByte = 0
+    @State private var sweepInterval = 2.0
+    @State private var sweepLog: [(byte: Int, at: Date)] = []
 
     private var model: HidrateBottleModel { app.model }
 
@@ -94,20 +97,59 @@ struct ExploreView: View {
     private var ledSweepSection: some View {
         Section("LED sweeper (find blue)") {
             HStack {
-                Text(String(format: "Byte 0x%02X (%d)", Int(ledSweep), Int(ledSweep)))
+                VStack(alignment: .leading) {
+                    Text(String(format: "0x%02X", sweepByte)).font(.system(.largeTitle, design: .monospaced)).bold()
+                    Text("byte \(sweepByte) of 255").font(.caption).foregroundStyle(.secondary)
+                }
                 Spacer()
-                Button("Send") { model.client.setLED(rawByte: UInt8(Int(ledSweep) & 0xFF)) }
-                    .buttonStyle(.bordered)
-                    .disabled(!model.isConnected)
+                VStack(spacing: 8) {
+                    Button(sweepRunning ? "Stop" : "Start") { sweepRunning.toggle() }
+                        .buttonStyle(.borderedProminent)
+                        .tint(sweepRunning ? .red : .blue)
+                        .disabled(!model.isConnected)
+                    Button("Resend") { model.client.setLED(rawByte: UInt8(sweepByte & 0xFF)) }
+                        .buttonStyle(.bordered)
+                        .disabled(!model.isConnected)
+                }
             }
-            Slider(value: $ledSweep, in: 0...255, step: 1) {
-                Text("LED byte")
-            } minimumValueLabel: { Text("0") } maximumValueLabel: { Text("255") }
-            .onChange(of: ledSweep) { _, v in
-                if model.isConnected { model.client.setLED(rawByte: UInt8(Int(v) & 0xFF)) }
+            Stepper(value: $sweepInterval, in: 1...6, step: 0.5) {
+                LabeledContent("Interval", value: String(format: "%.1f s", sweepInterval))
             }
-            Text("Drag slowly and watch the bottle. When it glows blue, note the byte and set it in Settings → Feedback.")
+            HStack {
+                Button("Back one") { sweepByte = max(0, sweepByte - 1); model.client.setLED(rawByte: UInt8(sweepByte)) }
+                Spacer()
+                Button("Reset to 0") { sweepByte = 0; sweepLog = [] }
+            }
+            .buttonStyle(.bordered)
+            .disabled(!model.isConnected)
+            Text(sweepRunning
+                 ? "Watch the bottle. When it does something, tap Stop, then use the list below to find the exact byte."
+                 : "Start sweeps one byte every interval. Recently sent bytes are listed below so you can identify the one that worked despite reaction lag.")
                 .font(.footnote).foregroundStyle(.secondary)
+            if !sweepLog.isEmpty {
+                ForEach(Array(sweepLog.enumerated()), id: \.offset) { _, item in
+                    HStack {
+                        Text(String(format: "0x%02X (%d)", item.byte, item.byte)).font(.body.monospaced())
+                        Spacer()
+                        Text(Format.time.string(from: item.at)).font(.caption2).foregroundStyle(.secondary)
+                        Button("Resend") { model.client.setLED(rawByte: UInt8(item.byte & 0xFF)) }
+                            .buttonStyle(.borderless).font(.caption)
+                        Button("Use") { app.drinkLEDByte = item.byte }
+                            .buttonStyle(.borderless).font(.caption)
+                    }
+                }
+            }
+        }
+        .task(id: sweepRunning) {
+            guard sweepRunning else { return }
+            while sweepRunning && !Task.isCancelled {
+                if model.isConnected { model.client.setLED(rawByte: UInt8(sweepByte & 0xFF)) }
+                sweepLog.insert((sweepByte, Date()), at: 0)
+                if sweepLog.count > 12 { sweepLog.removeLast(sweepLog.count - 12) }
+                try? await Task.sleep(for: .seconds(sweepInterval))
+                if !sweepRunning || Task.isCancelled { break }
+                sweepByte = sweepByte >= 255 ? 0 : sweepByte + 1
+            }
         }
     }
 
