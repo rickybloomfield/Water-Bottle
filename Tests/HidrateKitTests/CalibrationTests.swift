@@ -147,6 +147,6 @@ struct LevelTrackerTests {
         let json = #"{"minDrinkML":20,"minRefillML":40,"noiseML":4,"driftAdoptAfter":600}"#
         let decoded = try JSONDecoder().decode(LevelTracker.Configuration.self, from: Data(json.utf8))
         #expect(decoded.minDrinkML == 20)
-        #expect(decoded.settleSamples == 3)
+        #expect(decoded.settleSamples == 5)
     }
 }

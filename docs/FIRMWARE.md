@@ -45,8 +45,8 @@
 
 ## A concrete firmware defect worth fixing
 
-The PRO 2 puck changes its Bluetooth device address between sessions without offering a
-bond (see PROTOCOL.md). Address rotation is a privacy feature, but it is only workable
+The PRO 2 puck drops its connection and changes its Bluetooth device address roughly every
+15 minutes without offering a bond (see PROTOCOL.md). Address rotation is a privacy feature, but it is only workable
 when the peripheral bonds so the phone can resolve the new address; without that, every
 reconnect needs a full scan, which is exactly the behaviour that keeps the official app
 busy and the iOS Bluetooth stack under load. If custom firmware ever happens, the fix is

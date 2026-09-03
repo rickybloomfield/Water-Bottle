@@ -105,8 +105,11 @@ public enum LevelChange: Sendable, Hashable {
 ///   adopted as the resting level unless they jump by more than a drink/refill threshold.
 /// * When handled it switches to ~2 s notifications. Only readings that settle (N fast
 ///   samples within `noiseML`) are compared against the resting level.
-/// * Lifting the bottle unloads the cell and reads far below "empty"; anything below
-///   `liftedBelowML` is ignored.
+/// * The sensor weighs the water resting on the base, so a tilted bottle reads *lower*
+///   (like a partly empty one) rather than far below empty. That is why a settled reading
+///   during handling needs several agreeing fast samples (`settleSamples`, ~15 s): nobody
+///   holds a bottle tilted perfectly still that long. Anything below `liftedBelowML`
+///   is discarded outright.
 ///
 /// Feed it every sample, not just stable ones, with its timestamp.
 public struct LevelTracker: Sendable {
@@ -123,7 +126,7 @@ public struct LevelTracker: Sendable {
 
         public init(
             minDrinkML: Double = 15, minRefillML: Double = 30, noiseML: Double = 6,
-            liftedBelowML: Double = -40, fastCadenceSeconds: TimeInterval = 6, settleSamples: Int = 3
+            liftedBelowML: Double = -40, fastCadenceSeconds: TimeInterval = 6, settleSamples: Int = 5
         ) {
             self.minDrinkML = minDrinkML
             self.minRefillML = minRefillML

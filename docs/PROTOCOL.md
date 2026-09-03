@@ -20,9 +20,11 @@ Sources: [HydroSync](https://github.com/maxperron/HydroSync) (handshake bytes),
 * Advertisements carry the Reference service UUID `45855422-…`, so a central can scan for
   that service (this also works from the iOS background). **verified** on a PRO 2
   (`h2o00008823`, 2026-09-03).
-* **The bottle changes its Bluetooth address.** Observed on 2026-09-03: after a disconnect
-  the PRO 2 came back under a different CoreBluetooth identifier (`3540F042…` became
-  `97E619C6…`). Without bonding, iOS cannot recognise the new address as the same device,
+* **The bottle disconnects and changes its Bluetooth address about every 15 minutes.**
+  Observed on 2026-09-03 on the PRO 2: connected 09:19:09, the bottle itself dropped the
+  link at 09:34:36 (CoreBluetooth error 7, "The specified device has disconnected from us")
+  and re-advertised one second later under a new identifier (`97E619C6…` became `161647E5…`;
+  an earlier rotation went `3540F042…` to `97E619C6…`). Without bonding, iOS cannot recognise the new address as the same device,
   so a pending `connect()` to the old identifier never completes. Any client must re-scan
   by name (`h2o…`) or service and connect to whatever identifier it finds. This is almost
   certainly why the official app scans constantly and why it feels flaky. `HidrateBottleClient`
@@ -100,10 +102,17 @@ Behavioural notes on 100.64.0:
   ~40 s later, then at ~180 ms spacing. The bottle appears to service ATT requests only when
   it wakes, so keep reads to a minimum and never poll.
 * **Weight notifies every 15 s** regardless of activity (observed cadence 15.0 s).
-* The raw weight value drifted downward at ~15 units/min for at least seven minutes after the
-  bottle was unplugged from its charger (24990 → 24891) while apparently standing still.
-  Whether this is thermal recovery or a property of the sensor is still being measured;
-  drink detection must not be trusted until it is understood.
+* **Scale**: an empty/full capture on the 21 oz PRO 2 read ≈ 24040 empty and ≈ 25644 full,
+  so about **2.6 raw units per mL** (double the PRO v1's 1.3).
+* **The sensor weighs the water on the base, not the bottle.** Pouring the bottle out or
+  tilting it reads like "empty" (≈ 24040), not far below it, and lifting the bottle level
+  changes little. Drink detection therefore cannot use a "lifted" floor and instead waits
+  for readings to settle for ~15 s.
+* **Slow downward drift at rest**: ~15 units/min after unplugging from the charger, and
+  ~27 units/min for several minutes after a refill with tap water (25615 → 25471 over
+  5 min). Consistent with the puck cooling; not yet seen to flatten within a 10 minute
+  window. The tracker adopts drift between slow samples and only measures across handling
+  episodes, but the displayed absolute level will wander until this is understood.
 * Open questions: what a sip looks like on this firmware, what Set Point notifies, and what
   `2007A063` and the `3BBD…` channels do.
 
