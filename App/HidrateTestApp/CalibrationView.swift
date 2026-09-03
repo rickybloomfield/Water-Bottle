@@ -114,6 +114,7 @@ struct CalibrationView: View {
             defer { capturing = nil }
             do {
                 let raw = try await model.captureStableRaw(samples: 3, timeout: .seconds(120))
+                app.sessionLog.write(String(format: "calibration capture %@ raw=%.1f", step == .empty ? "empty" : "full", raw))
                 switch step {
                 case .empty: emptyRaw = raw
                 case .full: fullRaw = raw

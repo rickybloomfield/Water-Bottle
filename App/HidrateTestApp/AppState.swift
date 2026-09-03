@@ -157,6 +157,7 @@ final class AppState {
     var todayTotalML: Double { todayEntries.reduce(0) { $0 + $1.volumeML } }
 
     private func handle(_ event: LevelChangeEvent) {
+        sessionLog.write("levelChange \(event.change) raw=\(event.stableRaw)")
         guard intakeSource == .weight, case .drink(let volume, let from, let to) = event.change else { return }
         let entry = IntakeEntry(
             id: event.id, date: event.date, volumeML: volume.rounded(), source: .weight,
@@ -184,6 +185,7 @@ final class AppState {
     }
 
     private func add(_ entry: IntakeEntry) {
+        sessionLog.write("intake \(Int(entry.volumeML))mL source=\(entry.source.rawValue) autoLog=\(autoLogToHealth && entry.volumeML >= minimumLogML)")
         entries.insert(entry, at: 0)
         if entries.count > 2000 { entries.removeLast(entries.count - 2000) }
         if autoLogToHealth, entry.volumeML >= minimumLogML {
@@ -192,6 +194,7 @@ final class AppState {
     }
 
     func logToHealth(_ entry: IntakeEntry) async {
+        sessionLog.write("healthkit write \(Int(entry.volumeML))mL for \(entry.id)")
         guard let index = entries.firstIndex(where: { $0.id == entry.id }), entries[index].healthKitUUID == nil else { return }
         do {
             var metadata: [String: String] = [
@@ -251,7 +254,9 @@ final class AppState {
     // MARK: - Calibration
 
     func saveCalibration(emptyRaw: Double, fullRaw: Double) {
-        model.calibration = BottleCalibration(emptyRaw: emptyRaw, fullRaw: fullRaw, capacityML: capacityML)
+        let calibration = BottleCalibration(emptyRaw: emptyRaw, fullRaw: fullRaw, capacityML: capacityML)
+        sessionLog.write(String(format: "calibration saved empty=%.1f full=%.1f capacity=%.0f scale=%.3f raw/mL", emptyRaw, fullRaw, capacityML, calibration.rawUnitsPerML))
+        model.calibration = calibration
     }
 
     func clearCalibration() {
