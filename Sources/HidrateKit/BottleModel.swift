@@ -284,9 +284,9 @@ public final class HidrateBottleModel {
             if let stable = filter.ingest(sample.raw) {
                 stableRaw = stable
                 for continuation in stableSubscribers.values { continuation.yield(stable) }
+                trackLevel(raw: stable, at: sample.receivedAt)
             }
             stableStreak = filter.currentStreak
-            trackLevel(raw: sample.raw, at: sample.receivedAt)
         case .sip(let record):
             sips.insert(record, at: 0)
             if sips.count > 500 { sips.removeLast(sips.count - 500) }
@@ -300,21 +300,21 @@ public final class HidrateBottleModel {
         }
     }
 
-    /// Whether the tracker currently considers the bottle to be handled (fast notifications).
-    public var isBottleBeingHandled: Bool { tracker.isHandling }
-
     private func trackLevel(raw: Int, at date: Date) {
         guard let calibration, calibration.isValid else { return }
+        tracker.capacityML = calibration.capacityML
         let levelML = calibration.milliliters(forRaw: Double(raw))
+
+        // A below-empty reading means the bottle is lifted/tilted; don't anchor to it.
+        let plausible = levelML >= tracker.configuration.liftedBelowML
+        if pendingRecoveryCheck, plausible {
+            pendingRecoveryCheck = false
+            recoverAcrossGap(currentLevelML: tracker.baselineML ?? levelML, at: date)
+        }
+
         let change = tracker.ingest(levelML: levelML, at: date)
 
-        // Only settled *resting* readings are trustworthy anchors for cross-disconnect
-        // recovery and for the persisted last level; skip while the bottle is handled.
-        if !tracker.isBottleHandled {
-            if pendingRecoveryCheck {
-                pendingRecoveryCheck = false
-                recoverAcrossGap(currentLevelML: tracker.baselineML ?? levelML, at: date)
-            }
+        if plausible {
             store?.saveBaselineML(tracker.baselineML)
             store?.saveLastLevel(tracker.baselineML ?? levelML, date: date)
         }
@@ -336,21 +336,17 @@ public final class HidrateBottleModel {
         let slack = 0.15 * capacity
         guard (-slack...(capacity + slack)).contains(previous.levelML),
               (-slack...(capacity + slack)).contains(currentLevelML) else { return }
+        // Only reconstruct DRINKS across a gap. An apparent increase while we were away is
+        // far more likely surface/thermal offset than a real refill, so never log a
+        // recovered refill.
         let observedDrop = previous.levelML - currentLevelML
-        let config = tracker.configuration
-        if observedDrop > 0 {
-            let corrected = driftModel.correctedDrop(observedDrop: observedDrop, gapSeconds: gap)
-            guard corrected >= config.minDrinkML else { return }
-            let midpoint = previous.date.addingTimeInterval(gap / 2)
-            let change = LevelChange.drink(volumeML: corrected, fromML: previous.levelML, toML: currentLevelML)
-            let event = LevelChangeEvent(id: UUID(), date: midpoint, change: change, stableRaw: 0, approximate: true)
-            levelChanges.insert(event, at: 0)
-            onLevelChange?(event)
-        } else if -observedDrop >= config.minRefillML {
-            let change = LevelChange.refill(volumeML: -observedDrop, fromML: previous.levelML, toML: currentLevelML)
-            let event = LevelChangeEvent(id: UUID(), date: date, change: change, stableRaw: 0, approximate: true)
-            levelChanges.insert(event, at: 0)
-            onLevelChange?(event)
-        }
+        guard observedDrop > 0 else { return }
+        let corrected = driftModel.correctedDrop(observedDrop: observedDrop, gapSeconds: gap)
+        guard corrected >= tracker.configuration.minDrinkML else { return }
+        let midpoint = previous.date.addingTimeInterval(gap / 2)
+        let change = LevelChange.drink(volumeML: corrected, fromML: previous.levelML, toML: currentLevelML)
+        let event = LevelChangeEvent(id: UUID(), date: midpoint, change: change, stableRaw: 0, approximate: true)
+        levelChanges.insert(event, at: 0)
+        onLevelChange?(event)
     }
 }

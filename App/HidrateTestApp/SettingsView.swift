@@ -57,14 +57,11 @@ struct SettingsView: View {
                     Stepper(value: config.minDrinkML, in: 5...100, step: 5) {
                         LabeledContent("Minimum drink", value: Format.ml(config.wrappedValue.minDrinkML))
                     }
-                    Stepper(value: config.minRefillML, in: 10...300, step: 10) {
-                        LabeledContent("Minimum refill", value: Format.ml(config.wrappedValue.minRefillML))
+                    Stepper(value: config.refillFractionOfCapacity, in: 0.2...0.9, step: 0.05) {
+                        LabeledContent("Refill jump", value: "\(Int(config.wrappedValue.refillFractionOfCapacity * 100))% of bottle")
                     }
-                    Stepper(value: config.noiseML, in: 1...20, step: 1) {
-                        LabeledContent("Settle tolerance", value: Format.ml(config.wrappedValue.noiseML))
-                    }
-                    Stepper(value: config.liftedBelowML, in: -300...0, step: 10) {
-                        LabeledContent("Lifted below", value: Format.ml(config.wrappedValue.liftedBelowML))
+                    Stepper(value: config.nearFullFraction, in: 0.7...1.0, step: 0.05) {
+                        LabeledContent("Refill if filled to", value: "\(Int(config.wrappedValue.nearFullFraction * 100))% of bottle")
                     }
                     Stepper(value: Binding(get: { app.model.stabilitySamples }, set: { app.model.stabilitySamples = $0 }), in: 1...10) {
                         LabeledContent("Stable samples", value: "\(app.model.stabilitySamples)")
@@ -72,6 +69,8 @@ struct SettingsView: View {
                     Stepper(value: Binding(get: { app.model.stabilityTolerance }, set: { app.model.stabilityTolerance = $0 }), in: 1...20) {
                         LabeledContent("Stable tolerance", value: "±\(app.model.stabilityTolerance) raw")
                     }
+                    Text("A drink is any decrease past the minimum. An increase is only counted as a refill if it jumps by the refill fraction of the bottle, or the level reaches the fill line. Small increases from surface changes are ignored.")
+                        .font(.footnote).foregroundStyle(.secondary)
                     Button("Reset tracking baseline") { app.model.resetLevelBaseline() }
                 }
 

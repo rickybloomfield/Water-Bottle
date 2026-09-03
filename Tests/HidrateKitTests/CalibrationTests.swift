@@ -68,97 +68,100 @@ struct DriftModelTests {
 @Suite("Level tracker")
 struct LevelTrackerTests {
     let t0 = Date(timeIntervalSince1970: 1_000_000)
-    var config: LevelTracker.Configuration {
-        .init(minDrinkML: 15, minRefillML: 30, noiseML: 6, liftedBelowML: -40, fastCadenceSeconds: 6, settleSamples: 3)
+    func tracker() -> LevelTracker {
+        LevelTracker(configuration: .init(minDrinkML: 15, refillFractionOfCapacity: 0.5, nearFullFraction: 0.9, liftedBelowML: -60), capacityML: 621)
     }
 
-    @Test func slowCadenceDriftIsAdoptedSilently() {
-        var tracker = LevelTracker(configuration: config)
-        #expect(tracker.ingest(levelML: 600, at: t0) == .baseline(levelML: 600))
+    @Test func firstReadingIsBaseline() {
+        var t = tracker()
+        #expect(t.ingest(levelML: 600, at: t0) == .baseline(levelML: 600))
+        #expect(t.baselineML == 600)
+    }
+
+    @Test func decreaseIsADrink() {
+        var t = tracker()
+        _ = t.ingest(levelML: 600, at: t0)
+        #expect(t.ingest(levelML: 550, at: t0 + 10) == .drink(volumeML: 50, fromML: 600, toML: 550))
+        #expect(t.baselineML == 550)
+    }
+
+    @Test func smallIncreaseIsIgnoredAndDoesNotInflateBaseline() {
+        var t = tracker()
+        _ = t.ingest(levelML: 500, at: t0)
+        // Placed on a surface that reads 40 mL high — must NOT be a refill and must NOT
+        // raise the baseline.
+        #expect(t.ingest(levelML: 540, at: t0 + 10) == nil)
+        #expect(t.baselineML == 500)
+        // A later real drink is still measured from the true 500, not an inflated 540.
+        #expect(t.ingest(levelML: 470, at: t0 + 20) == .drink(volumeML: 30, fromML: 500, toML: 470))
+    }
+
+    @Test func smallDecreaseIsAdoptedNotLogged() {
+        var t = tracker()
+        _ = t.ingest(levelML: 500, at: t0)
+        #expect(t.ingest(levelML: 492, at: t0 + 10) == nil) // 8 mL, below minimum
+        #expect(t.baselineML == 492) // adopted downward
+    }
+
+    @Test func bigJumpIsARefill() {
+        var t = tracker()
+        _ = t.ingest(levelML: 100, at: t0)
+        // +400 mL (> 50% of 621) is a refill.
+        let change = t.ingest(levelML: 500, at: t0 + 10)
+        #expect(change == .refill(volumeML: 400, fromML: 100, toML: 500))
+    }
+
+    @Test func toppingOffToFullIsARefillEvenIfIncreaseIsModest() {
+        var t = tracker()
+        _ = t.ingest(levelML: 380, at: t0) // ~61%
+        // +240 mL is < 50% of the bottle, but it reaches 620 (~100%), so it's a top-off.
+        let change = t.ingest(levelML: 620, at: t0 + 10)
+        guard case .refill(let v, _, _)? = change else { Issue.record("expected refill"); return }
+        #expect(abs(v - 240) < 0.01)
+        #expect(t.baselineML == 620)
+    }
+
+    @Test func modestIncreaseNotReachingFullIsNotARefill() {
+        var t = tracker()
+        _ = t.ingest(levelML: 300, at: t0)
+        // +150 mL, ends at 450 (~72%): neither a big jump nor near full → ignored.
+        #expect(t.ingest(levelML: 450, at: t0 + 10) == nil)
+        #expect(t.baselineML == 300)
+    }
+
+    @Test func liftedReadingIsIgnored() {
+        var t = tracker()
+        _ = t.ingest(levelML: 500, at: t0)
+        #expect(t.ingest(levelML: -200, at: t0 + 5) == nil) // inverted/lifted
+        #expect(t.baselineML == 500) // unchanged
+        #expect(t.ingest(levelML: 460, at: t0 + 10) == .drink(volumeML: 40, fromML: 500, toML: 460))
+    }
+
+    @Test func driftDownIsAbsorbedWithoutEvents() {
+        var t = tracker()
+        _ = t.ingest(levelML: 600, at: t0)
         var level = 600.0
-        for i in 1...20 {
-            level -= 3 // ~12 mL/min of thermal drift at 15 s cadence
-            #expect(tracker.ingest(levelML: level, at: t0 + Double(i) * 15) == nil)
+        for i in 1...30 {
+            level -= 4 // ~4 mL per settled reading, below the drink threshold
+            #expect(t.ingest(levelML: level, at: t0 + Double(i) * 15) == nil)
         }
-        // The last sample is still pending confirmation; the one before it is the baseline.
-        #expect(tracker.baselineML == level + 3)
-    }
-
-    @Test func slowCadenceJumpIsStillADrink() {
-        var tracker = LevelTracker(configuration: config)
-        _ = tracker.ingest(levelML: 600, at: t0)
-        // A slow sample is confirmed by the next slow sample, so events lag by one reading.
-        #expect(tracker.ingest(levelML: 560, at: t0 + 15) == nil)
-        #expect(tracker.ingest(levelML: 600, at: t0 + 30) == .drink(volumeML: 40, fromML: 600, toML: 560))
-        #expect(tracker.ingest(levelML: 600, at: t0 + 45) == .refill(volumeML: 40, fromML: 560, toML: 600))
-    }
-
-    @Test func handlingEpisodeIgnoresLiftAndReportsSettledDrop() {
-        var tracker = LevelTracker(configuration: config)
-        _ = tracker.ingest(levelML: 600, at: t0)
-        _ = tracker.ingest(levelML: 599, at: t0 + 15)
-        var t = t0 + 30
-        // Picked up: the first burst sample arrives at slow spacing, then fast readings far
-        // below empty while lifted.
-        for v in [590.0, -200, -201, -199, -200] {
-            #expect(tracker.ingest(levelML: v, at: t) == nil)
-            if v < 0 { #expect(tracker.isHandling) }
-            t += 2
-        }
-        // Set back down: three agreeing fast samples.
-        #expect(tracker.ingest(levelML: 552, at: t) == nil)
-        #expect(tracker.ingest(levelML: 551, at: t + 2) == nil)
-        let change = tracker.ingest(levelML: 552, at: t + 4)
-        guard case .drink(let volume, let from, let to)? = change else {
-            Issue.record("expected a drink, got \(String(describing: change))")
-            return
-        }
-        #expect(from == 599)
-        #expect(abs(to - 551.67) < 0.01)
-        #expect(abs(volume - 47.33) < 0.01)
-        // Cadence returns to slow with no further change.
-        #expect(tracker.ingest(levelML: 551, at: t + 20) == nil)
-        #expect(!tracker.isHandling)
-    }
-
-    @Test func unsettledFastSamplesNeverReport() {
-        var tracker = LevelTracker(configuration: config)
-        _ = tracker.ingest(levelML: 600, at: t0)
-        var t = t0 + 15
-        for v in [580.0, 560, 540, 520, 500, 480] {
-            #expect(tracker.ingest(levelML: v, at: t) == nil)
-            t += 2
-        }
-        #expect(tracker.baselineML == 600)
-    }
-
-    @Test func refillDuringHandling() {
-        var tracker = LevelTracker(configuration: config)
-        _ = tracker.ingest(levelML: 200, at: t0)
-        var t = t0 + 15
-        for v in [-150.0, -151, 400, 600, 610, 611, 610] {
-            let result = tracker.ingest(levelML: v, at: t)
-            if v == 610, t > t0 + 25 {
-                if case .refill(let volume, _, _)? = result { #expect(abs(volume - 410.33) < 0.01) }
-            }
-            t += 2
-        }
-        #expect(tracker.baselineML.map { abs($0 - 610.33) < 0.01 } == true)
-    }
-
-    @Test func resetRestoresBaseline() {
-        var tracker = LevelTracker()
-        _ = tracker.ingest(levelML: 300)
-        tracker.reset(baselineML: 500)
-        #expect(tracker.baselineML == 500)
-        tracker.reset()
-        #expect(tracker.baselineML == nil)
+        #expect(t.baselineML == level)
     }
 
     @Test func configurationDecodesOldJSON() throws {
         let json = #"{"minDrinkML":20,"minRefillML":40,"noiseML":4,"driftAdoptAfter":600}"#
         let decoded = try JSONDecoder().decode(LevelTracker.Configuration.self, from: Data(json.utf8))
         #expect(decoded.minDrinkML == 20)
-        #expect(decoded.settleSamples == 5)
+        #expect(decoded.refillFractionOfCapacity == 0.5) // default applied for missing key
+        #expect(decoded.nearFullFraction == 0.9)
+    }
+
+    @Test func resetRestoresBaseline() {
+        var t = tracker()
+        _ = t.ingest(levelML: 300, at: t0)
+        t.reset(baselineML: 500)
+        #expect(t.baselineML == 500)
+        t.reset()
+        #expect(t.baselineML == nil)
     }
 }

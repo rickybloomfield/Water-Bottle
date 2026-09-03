@@ -129,147 +129,105 @@ public struct DriftModel: Sendable, Equatable, Codable {
     }
 }
 
-/// Turns calibrated level samples into drink and refill events.
+/// Turns settled, calibrated level readings into drink and refill events.
 ///
-/// Designed around how the PRO 2 sensor behaves:
+/// The PRO 2 load cell reads slightly differently on different surfaces and drifts with
+/// temperature, so absolute readings wander even when the water volume has not changed.
+/// The rules here are deliberately asymmetric to match physical reality:
 ///
-/// * At rest it notifies every ~15 s and drifts slowly (thermal). Slow-cadence samples are
-///   adopted as the resting level unless they jump by more than a drink/refill threshold.
-/// * When handled it switches to ~2 s notifications. Only readings that settle (N fast
-///   samples within `noiseML`) are compared against the resting level.
-/// * The sensor weighs the water resting on the base, so a tilted bottle reads *lower*
-///   (like a partly empty one) rather than far below empty. That is why a settled reading
-///   during handling needs several agreeing fast samples (`settleSamples`, ~15 s): nobody
-///   holds a bottle tilted perfectly still that long. Anything below `liftedBelowML`
-///   is discarded outright.
+/// * **A drink is any decrease** past `minDrinkML`. Water leaving the bottle is the only
+///   thing that lowers the true level, so a real drop is trusted.
+/// * **An increase is ignored** unless it is unmistakably a refill: either a jump of at
+///   least `refillFractionOfCapacity` of the bottle, or the level reaching
+///   `nearFullFraction` of capacity (you top off to the brim). Small increases are surface
+///   or thermal noise and must never be logged as "water added".
+/// * **The baseline never inflates on a small change.** A small increase is dropped and the
+///   baseline held; a small decrease is adopted. So placing the bottle on a surface that
+///   reads a little high cannot quietly raise the recorded volume and inflate the next
+///   drink.
 ///
-/// Feed it every sample, not just stable ones, with its timestamp.
+/// Feed it settled readings (e.g. the output of `StableWeightFilter`).
 public struct LevelTracker: Sendable {
     public struct Configuration: Sendable, Equatable, Codable {
+        /// A decrease of at least this many mL between settled readings is a drink.
         public var minDrinkML: Double
-        public var minRefillML: Double
-        /// Settle tolerance: spread allowed across `settleSamples` fast samples.
-        public var noiseML: Double
-        /// Readings below this level mean the bottle is lifted or tilted; ignore them.
+        /// An increase of at least this fraction of capacity is a refill.
+        public var refillFractionOfCapacity: Double
+        /// Reaching at least this fraction of capacity (with a non-trivial increase) is a
+        /// refill too — this is the "I always fill to the top" signal.
+        public var nearFullFraction: Double
+        /// Ignore any settled reading that maps below this level (bottle lifted or tilted).
         public var liftedBelowML: Double
-        /// Samples arriving faster than this are "handling" samples.
-        public var fastCadenceSeconds: TimeInterval
-        public var settleSamples: Int
 
         public init(
-            minDrinkML: Double = 15, minRefillML: Double = 30, noiseML: Double = 6,
-            liftedBelowML: Double = -40, fastCadenceSeconds: TimeInterval = 6, settleSamples: Int = 5
+            minDrinkML: Double = 15,
+            refillFractionOfCapacity: Double = 0.5,
+            nearFullFraction: Double = 0.9,
+            liftedBelowML: Double = -60
         ) {
             self.minDrinkML = minDrinkML
-            self.minRefillML = minRefillML
-            self.noiseML = noiseML
+            self.refillFractionOfCapacity = refillFractionOfCapacity
+            self.nearFullFraction = nearFullFraction
             self.liftedBelowML = liftedBelowML
-            self.fastCadenceSeconds = fastCadenceSeconds
-            self.settleSamples = settleSamples
         }
 
         enum CodingKeys: String, CodingKey {
-            case minDrinkML, minRefillML, noiseML, liftedBelowML, fastCadenceSeconds, settleSamples
+            case minDrinkML, refillFractionOfCapacity, nearFullFraction, liftedBelowML
         }
-
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             let d = Configuration()
             minDrinkML = try c.decodeIfPresent(Double.self, forKey: .minDrinkML) ?? d.minDrinkML
-            minRefillML = try c.decodeIfPresent(Double.self, forKey: .minRefillML) ?? d.minRefillML
-            noiseML = try c.decodeIfPresent(Double.self, forKey: .noiseML) ?? d.noiseML
+            refillFractionOfCapacity = try c.decodeIfPresent(Double.self, forKey: .refillFractionOfCapacity) ?? d.refillFractionOfCapacity
+            nearFullFraction = try c.decodeIfPresent(Double.self, forKey: .nearFullFraction) ?? d.nearFullFraction
             liftedBelowML = try c.decodeIfPresent(Double.self, forKey: .liftedBelowML) ?? d.liftedBelowML
-            fastCadenceSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .fastCadenceSeconds) ?? d.fastCadenceSeconds
-            settleSamples = try c.decodeIfPresent(Int.self, forKey: .settleSamples) ?? d.settleSamples
         }
     }
 
     public var configuration: Configuration
-    /// The level the next change is measured against.
+    /// Bottle capacity in mL, needed for the refill thresholds. Set from the calibration.
+    public var capacityML: Double
+    /// The level the next change is measured against (best estimate of true current volume).
     public private(set) var baselineML: Double?
-    public private(set) var isHandling = false
-    public var isBottleHandled: Bool { isHandling }
-    private var lastSampleAt: Date?
-    private var recent: [Double] = []
-    /// A sample that arrived at slow cadence. It is only a rest reading if the *next*
-    /// sample is also slow; if the next one arrives fast, it was the start of handling.
-    private var pending: Double?
 
-    public init(configuration: Configuration = Configuration()) {
+    public init(configuration: Configuration = Configuration(), capacityML: Double = 621) {
         self.configuration = configuration
+        self.capacityML = capacityML
     }
 
+    @discardableResult
     public mutating func ingest(levelML: Double, at date: Date = Date()) -> LevelChange? {
-        let interval = lastSampleAt.map { date.timeIntervalSince($0) } ?? .infinity
-        lastSampleAt = date
-        let fast = interval < configuration.fastCadenceSeconds
+        // A reading well below empty means the bottle is lifted or tilted, not that it was
+        // drained. Ignore it entirely so it can't register as a giant drink.
+        if levelML < configuration.liftedBelowML { return nil }
 
-        guard baselineML != nil else {
+        guard let base = baselineML else {
             baselineML = levelML
             return .baseline(levelML: levelML)
         }
+        let delta = levelML - base
 
-        if levelML < configuration.liftedBelowML {
-            // Lifted or tilted. A rest sample that preceded the lift is confirmed as rest.
-            let result = fast ? nil : commitPending()
-            pending = nil
-            recent = []
-            isHandling = true
-            return result
+        // A drink: any trusted decrease.
+        if delta <= -configuration.minDrinkML {
+            baselineML = levelML
+            return .drink(volumeML: -delta, fromML: base, toML: levelML)
         }
 
-        if !fast {
-            // Slow cadence: confirm the previous slow sample as a rest reading and hold this one.
-            let result = commitPending()
-            pending = levelML
-            recent = []
-            isHandling = false
-            return result
+        // A refill: a large jump up, or topping off to near-full.
+        let bigJump = delta >= configuration.refillFractionOfCapacity * capacityML
+        let toppedOff = levelML >= configuration.nearFullFraction * capacityML && delta >= configuration.minDrinkML
+        if bigJump || toppedOff {
+            baselineML = levelML
+            return .refill(volumeML: delta, fromML: base, toML: levelML)
         }
 
-        // Fast cadence: the bottle is being handled.
-        isHandling = true
-        if let held = pending {
-            recent.append(held)
-            pending = nil
-        }
-        recent.append(levelML)
-        if recent.count > configuration.settleSamples { recent.removeFirst(recent.count - configuration.settleSamples) }
-        guard recent.count == configuration.settleSamples,
-              let lo = recent.min(), let hi = recent.max(), hi - lo <= configuration.noiseML else { return nil }
-        let settled = recent.reduce(0, +) / Double(recent.count)
-        recent = []
-        return compare(settled)
-    }
-
-    private mutating func commitPending() -> LevelChange? {
-        guard let held = pending else { return nil }
-        pending = nil
-        return compare(held)
-    }
-
-    private mutating func compare(_ level: Double) -> LevelChange? {
-        guard let base = baselineML else {
-            baselineML = level
-            return .baseline(levelML: level)
-        }
-        let drop = base - level
-        baselineML = level
-        if drop >= configuration.minDrinkML {
-            return .drink(volumeML: drop, fromML: base, toML: level)
-        }
-        if -drop >= configuration.minRefillML {
-            return .refill(volumeML: -drop, fromML: base, toML: level)
-        }
+        // Small change: never inflate the baseline. Adopt a small decrease (drift or a
+        // sub-threshold sip); drop a small increase (surface/thermal noise).
+        if levelML < base { baselineML = levelML }
         return nil
     }
 
-    /// Forget the baseline (for example after recalibrating).
     public mutating func reset(baselineML: Double? = nil) {
         self.baselineML = baselineML
-        recent = []
-        pending = nil
-        lastSampleAt = nil
-        isHandling = false
     }
 }
