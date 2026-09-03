@@ -97,69 +97,143 @@ public enum LevelChange: Sendable, Hashable {
     case refill(volumeML: Double, fromML: Double, toML: Double)
 }
 
-/// Turns a sequence of stable, calibrated level readings into drink and refill events.
+/// Turns calibrated level samples into drink and refill events.
 ///
-/// A drink is registered when the level falls at least `minDrinkML` below the last
-/// settled baseline. Sub-threshold changes are ignored, but the baseline is not moved
-/// for them, so three small sips add up to one drink event. A sub-threshold change that
-/// persists for `driftAdoptAfter` is treated as sensor drift and adopted silently.
+/// Designed around how the PRO 2 sensor behaves:
+///
+/// * At rest it notifies every ~15 s and drifts slowly (thermal). Slow-cadence samples are
+///   adopted as the resting level unless they jump by more than a drink/refill threshold.
+/// * When handled it switches to ~2 s notifications. Only readings that settle (N fast
+///   samples within `noiseML`) are compared against the resting level.
+/// * Lifting the bottle unloads the cell and reads far below "empty"; anything below
+///   `liftedBelowML` is ignored.
+///
+/// Feed it every sample, not just stable ones, with its timestamp.
 public struct LevelTracker: Sendable {
     public struct Configuration: Sendable, Equatable, Codable {
         public var minDrinkML: Double
         public var minRefillML: Double
+        /// Settle tolerance: spread allowed across `settleSamples` fast samples.
         public var noiseML: Double
-        public var driftAdoptAfter: TimeInterval
+        /// Readings below this level mean the bottle is lifted or tilted; ignore them.
+        public var liftedBelowML: Double
+        /// Samples arriving faster than this are "handling" samples.
+        public var fastCadenceSeconds: TimeInterval
+        public var settleSamples: Int
 
-        public init(minDrinkML: Double = 15, minRefillML: Double = 30, noiseML: Double = 4, driftAdoptAfter: TimeInterval = 600) {
+        public init(
+            minDrinkML: Double = 15, minRefillML: Double = 30, noiseML: Double = 6,
+            liftedBelowML: Double = -40, fastCadenceSeconds: TimeInterval = 6, settleSamples: Int = 3
+        ) {
             self.minDrinkML = minDrinkML
             self.minRefillML = minRefillML
             self.noiseML = noiseML
-            self.driftAdoptAfter = driftAdoptAfter
+            self.liftedBelowML = liftedBelowML
+            self.fastCadenceSeconds = fastCadenceSeconds
+            self.settleSamples = settleSamples
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case minDrinkML, minRefillML, noiseML, liftedBelowML, fastCadenceSeconds, settleSamples
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            let d = Configuration()
+            minDrinkML = try c.decodeIfPresent(Double.self, forKey: .minDrinkML) ?? d.minDrinkML
+            minRefillML = try c.decodeIfPresent(Double.self, forKey: .minRefillML) ?? d.minRefillML
+            noiseML = try c.decodeIfPresent(Double.self, forKey: .noiseML) ?? d.noiseML
+            liftedBelowML = try c.decodeIfPresent(Double.self, forKey: .liftedBelowML) ?? d.liftedBelowML
+            fastCadenceSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .fastCadenceSeconds) ?? d.fastCadenceSeconds
+            settleSamples = try c.decodeIfPresent(Int.self, forKey: .settleSamples) ?? d.settleSamples
         }
     }
 
     public var configuration: Configuration
+    /// The level the next change is measured against.
     public private(set) var baselineML: Double?
-    private var candidate: (levelML: Double, since: Date)?
+    public private(set) var isHandling = false
+    private var lastSampleAt: Date?
+    private var recent: [Double] = []
+    /// A sample that arrived at slow cadence. It is only a rest reading if the *next*
+    /// sample is also slow; if the next one arrives fast, it was the start of handling.
+    private var pending: Double?
 
     public init(configuration: Configuration = Configuration()) {
         self.configuration = configuration
     }
 
     public mutating func ingest(levelML: Double, at date: Date = Date()) -> LevelChange? {
-        guard let base = baselineML else {
+        let interval = lastSampleAt.map { date.timeIntervalSince($0) } ?? .infinity
+        lastSampleAt = date
+        let fast = interval < configuration.fastCadenceSeconds
+
+        guard baselineML != nil else {
             baselineML = levelML
             return .baseline(levelML: levelML)
         }
-        let drop = base - levelML
+
+        if levelML < configuration.liftedBelowML {
+            // Lifted or tilted. A rest sample that preceded the lift is confirmed as rest.
+            let result = fast ? nil : commitPending()
+            pending = nil
+            recent = []
+            isHandling = true
+            return result
+        }
+
+        if !fast {
+            // Slow cadence: confirm the previous slow sample as a rest reading and hold this one.
+            let result = commitPending()
+            pending = levelML
+            recent = []
+            isHandling = false
+            return result
+        }
+
+        // Fast cadence: the bottle is being handled.
+        isHandling = true
+        if let held = pending {
+            recent.append(held)
+            pending = nil
+        }
+        recent.append(levelML)
+        if recent.count > configuration.settleSamples { recent.removeFirst(recent.count - configuration.settleSamples) }
+        guard recent.count == configuration.settleSamples,
+              let lo = recent.min(), let hi = recent.max(), hi - lo <= configuration.noiseML else { return nil }
+        let settled = recent.reduce(0, +) / Double(recent.count)
+        recent = []
+        return compare(settled)
+    }
+
+    private mutating func commitPending() -> LevelChange? {
+        guard let held = pending else { return nil }
+        pending = nil
+        return compare(held)
+    }
+
+    private mutating func compare(_ level: Double) -> LevelChange? {
+        guard let base = baselineML else {
+            baselineML = level
+            return .baseline(levelML: level)
+        }
+        let drop = base - level
+        baselineML = level
         if drop >= configuration.minDrinkML {
-            baselineML = levelML
-            candidate = nil
-            return .drink(volumeML: drop, fromML: base, toML: levelML)
+            return .drink(volumeML: drop, fromML: base, toML: level)
         }
         if -drop >= configuration.minRefillML {
-            baselineML = levelML
-            candidate = nil
-            return .refill(volumeML: -drop, fromML: base, toML: levelML)
-        }
-        if abs(drop) < configuration.noiseML {
-            candidate = nil
-            return nil
-        }
-        if let candidate, abs(candidate.levelML - levelML) < configuration.noiseML {
-            if date.timeIntervalSince(candidate.since) >= configuration.driftAdoptAfter {
-                baselineML = levelML
-                self.candidate = nil
-            }
-        } else {
-            candidate = (levelML, date)
+            return .refill(volumeML: -drop, fromML: base, toML: level)
         }
         return nil
     }
 
-    /// Forget the baseline (for example after recalibrating or reconnecting).
+    /// Forget the baseline (for example after recalibrating).
     public mutating func reset(baselineML: Double? = nil) {
         self.baselineML = baselineML
-        candidate = nil
+        recent = []
+        pending = nil
+        lastSampleAt = nil
+        isHandling = false
     }
 }

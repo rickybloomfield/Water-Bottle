@@ -55,38 +55,83 @@ struct StableWeightFilterTests {
 
 @Suite("Level tracker")
 struct LevelTrackerTests {
-    @Test func detectsDrinksRefillsAndIgnoresNoise() {
-        var tracker = LevelTracker(configuration: .init(minDrinkML: 15, minRefillML: 30, noiseML: 4, driftAdoptAfter: 600))
-        let t0 = Date(timeIntervalSince1970: 1_000_000)
+    let t0 = Date(timeIntervalSince1970: 1_000_000)
+    var config: LevelTracker.Configuration {
+        .init(minDrinkML: 15, minRefillML: 30, noiseML: 6, liftedBelowML: -40, fastCadenceSeconds: 6, settleSamples: 3)
+    }
+
+    @Test func slowCadenceDriftIsAdoptedSilently() {
+        var tracker = LevelTracker(configuration: config)
         #expect(tracker.ingest(levelML: 600, at: t0) == .baseline(levelML: 600))
-        #expect(tracker.ingest(levelML: 598, at: t0 + 2) == nil)
-        #expect(tracker.ingest(levelML: 580, at: t0 + 4) == .drink(volumeML: 20, fromML: 600, toML: 580))
-        #expect(tracker.ingest(levelML: 540, at: t0 + 6) == .drink(volumeML: 40, fromML: 580, toML: 540))
-        #expect(tracker.ingest(levelML: 600, at: t0 + 8) == .refill(volumeML: 60, fromML: 540, toML: 600))
+        var level = 600.0
+        for i in 1...20 {
+            level -= 3 // ~12 mL/min of thermal drift at 15 s cadence
+            #expect(tracker.ingest(levelML: level, at: t0 + Double(i) * 15) == nil)
+        }
+        // The last sample is still pending confirmation; the one before it is the baseline.
+        #expect(tracker.baselineML == level + 3)
+    }
+
+    @Test func slowCadenceJumpIsStillADrink() {
+        var tracker = LevelTracker(configuration: config)
+        _ = tracker.ingest(levelML: 600, at: t0)
+        // A slow sample is confirmed by the next slow sample, so events lag by one reading.
+        #expect(tracker.ingest(levelML: 560, at: t0 + 15) == nil)
+        #expect(tracker.ingest(levelML: 600, at: t0 + 30) == .drink(volumeML: 40, fromML: 600, toML: 560))
+        #expect(tracker.ingest(levelML: 600, at: t0 + 45) == .refill(volumeML: 40, fromML: 560, toML: 600))
+    }
+
+    @Test func handlingEpisodeIgnoresLiftAndReportsSettledDrop() {
+        var tracker = LevelTracker(configuration: config)
+        _ = tracker.ingest(levelML: 600, at: t0)
+        _ = tracker.ingest(levelML: 599, at: t0 + 15)
+        var t = t0 + 30
+        // Picked up: the first burst sample arrives at slow spacing, then fast readings far
+        // below empty while lifted.
+        for v in [590.0, -200, -201, -199, -200] {
+            #expect(tracker.ingest(levelML: v, at: t) == nil)
+            if v < 0 { #expect(tracker.isHandling) }
+            t += 2
+        }
+        // Set back down: three agreeing fast samples.
+        #expect(tracker.ingest(levelML: 552, at: t) == nil)
+        #expect(tracker.ingest(levelML: 551, at: t + 2) == nil)
+        let change = tracker.ingest(levelML: 552, at: t + 4)
+        guard case .drink(let volume, let from, let to)? = change else {
+            Issue.record("expected a drink, got \(String(describing: change))")
+            return
+        }
+        #expect(from == 599)
+        #expect(abs(to - 551.67) < 0.01)
+        #expect(abs(volume - 47.33) < 0.01)
+        // Cadence returns to slow with no further change.
+        #expect(tracker.ingest(levelML: 551, at: t + 20) == nil)
+        #expect(!tracker.isHandling)
+    }
+
+    @Test func unsettledFastSamplesNeverReport() {
+        var tracker = LevelTracker(configuration: config)
+        _ = tracker.ingest(levelML: 600, at: t0)
+        var t = t0 + 15
+        for v in [580.0, 560, 540, 520, 500, 480] {
+            #expect(tracker.ingest(levelML: v, at: t) == nil)
+            t += 2
+        }
         #expect(tracker.baselineML == 600)
     }
 
-    @Test func smallSipsAccumulate() {
-        var tracker = LevelTracker(configuration: .init(minDrinkML: 15, minRefillML: 30, noiseML: 4, driftAdoptAfter: 600))
-        let t0 = Date(timeIntervalSince1970: 1_000_000)
-        _ = tracker.ingest(levelML: 600, at: t0)
-        #expect(tracker.ingest(levelML: 592, at: t0 + 10) == nil)
-        #expect(tracker.ingest(levelML: 586, at: t0 + 20) == nil)
-        #expect(tracker.ingest(levelML: 570, at: t0 + 30) == .drink(volumeML: 30, fromML: 600, toML: 570))
-    }
-
-    @Test func persistentSubThresholdChangeIsAdoptedAsDrift() {
-        var tracker = LevelTracker(configuration: .init(minDrinkML: 15, minRefillML: 30, noiseML: 4, driftAdoptAfter: 600))
-        let t0 = Date(timeIntervalSince1970: 1_000_000)
-        _ = tracker.ingest(levelML: 600, at: t0)
-        #expect(tracker.ingest(levelML: 594, at: t0 + 10) == nil)
-        #expect(tracker.ingest(levelML: 594, at: t0 + 300) == nil)
-        #expect(tracker.baselineML == 600)
-        #expect(tracker.ingest(levelML: 594, at: t0 + 700) == nil)
-        #expect(tracker.baselineML == 594)
-        // 14 mL below the new baseline is still under the threshold.
-        #expect(tracker.ingest(levelML: 580, at: t0 + 710) == nil)
-        #expect(tracker.ingest(levelML: 578, at: t0 + 720) == .drink(volumeML: 16, fromML: 594, toML: 578))
+    @Test func refillDuringHandling() {
+        var tracker = LevelTracker(configuration: config)
+        _ = tracker.ingest(levelML: 200, at: t0)
+        var t = t0 + 15
+        for v in [-150.0, -151, 400, 600, 610, 611, 610] {
+            let result = tracker.ingest(levelML: v, at: t)
+            if v == 610, t > t0 + 25 {
+                if case .refill(let volume, _, _)? = result { #expect(abs(volume - 410.33) < 0.01) }
+            }
+            t += 2
+        }
+        #expect(tracker.baselineML.map { abs($0 - 610.33) < 0.01 } == true)
     }
 
     @Test func resetRestoresBaseline() {
@@ -96,5 +141,12 @@ struct LevelTrackerTests {
         #expect(tracker.baselineML == 500)
         tracker.reset()
         #expect(tracker.baselineML == nil)
+    }
+
+    @Test func configurationDecodesOldJSON() throws {
+        let json = #"{"minDrinkML":20,"minRefillML":40,"noiseML":4,"driftAdoptAfter":600}"#
+        let decoded = try JSONDecoder().decode(LevelTracker.Configuration.self, from: Data(json.utf8))
+        #expect(decoded.minDrinkML == 20)
+        #expect(decoded.settleSamples == 3)
     }
 }

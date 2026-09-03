@@ -32,7 +32,10 @@ struct SettingsView: View {
                         LabeledContent("Minimum refill", value: Format.ml(config.wrappedValue.minRefillML))
                     }
                     Stepper(value: config.noiseML, in: 1...20, step: 1) {
-                        LabeledContent("Noise band", value: Format.ml(config.wrappedValue.noiseML))
+                        LabeledContent("Settle tolerance", value: Format.ml(config.wrappedValue.noiseML))
+                    }
+                    Stepper(value: config.liftedBelowML, in: -300...0, step: 10) {
+                        LabeledContent("Lifted below", value: Format.ml(config.wrappedValue.liftedBelowML))
                     }
                     Stepper(value: Binding(get: { app.model.stabilitySamples }, set: { app.model.stabilitySamples = $0 }), in: 1...10) {
                         LabeledContent("Stable samples", value: "\(app.model.stabilitySamples)")

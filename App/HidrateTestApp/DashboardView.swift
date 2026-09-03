@@ -89,6 +89,7 @@ struct DashboardView: View {
                 if let baseline = model.baselineLevelML {
                     LabeledContent("Tracking baseline", value: Format.ml(baseline))
                 }
+                LabeledContent("Activity", value: model.isBottleBeingHandled ? "Handling (fast updates)" : "At rest")
             } else {
                 Label("Not calibrated. Use the Calibrate tab.", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)

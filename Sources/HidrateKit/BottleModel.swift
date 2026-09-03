@@ -270,9 +270,9 @@ public final class HidrateBottleModel {
             if let stable = filter.ingest(sample.raw) {
                 stableRaw = stable
                 for continuation in stableSubscribers.values { continuation.yield(stable) }
-                trackLevel(stableRaw: stable, at: sample.receivedAt)
             }
             stableStreak = filter.currentStreak
+            trackLevel(raw: sample.raw, at: sample.receivedAt)
         case .sip(let record):
             sips.insert(record, at: 0)
             if sips.count > 500 { sips.removeLast(sips.count - 500) }
@@ -286,12 +286,18 @@ public final class HidrateBottleModel {
         }
     }
 
-    private func trackLevel(stableRaw: Int, at date: Date) {
+    /// Whether the tracker currently considers the bottle to be handled (fast notifications).
+    public var isBottleBeingHandled: Bool { tracker.isHandling }
+
+    private func trackLevel(raw: Int, at date: Date) {
         guard let calibration, calibration.isValid else { return }
-        let levelML = calibration.milliliters(forRaw: Double(stableRaw))
-        guard let change = tracker.ingest(levelML: levelML, at: date) else { return }
+        let levelML = calibration.milliliters(forRaw: Double(raw))
+        guard let change = tracker.ingest(levelML: levelML, at: date) else {
+            store?.saveBaselineML(tracker.baselineML)
+            return
+        }
         store?.saveBaselineML(tracker.baselineML)
-        let event = LevelChangeEvent(id: UUID(), date: date, change: change, stableRaw: stableRaw)
+        let event = LevelChangeEvent(id: UUID(), date: date, change: change, stableRaw: raw)
         if case .baseline = change {
             return
         }
