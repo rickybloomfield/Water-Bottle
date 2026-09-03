@@ -2,13 +2,27 @@
 
 ## What we know about the hardware
 
-* The sensor puck runs a **Nordic nRF52832** (community-confirmed on the Steel/PRO puck
-  reporting firmware `80.18`). The PRO 2 puck is believed to be the same family; the
-  Explore tab's Device Information readout will tell you the exact firmware string.
-* The GATT table includes a Nordic UART service, and community bottles expose the Nordic
-  **Secure DFU** service (`FE59`). Secure DFU packages are signed (ECDSA P-256) with the
-  vendor's private key; the bootloader rejects anything else. That is why "improve the
-  firmware and push it over the air" is not an option without Hidrate's key.
+* **PRO v1 / Steel** pucks (community, firmware `80.18`) run a **Nordic nRF52832** and
+  expose Nordic **Secure DFU** (`FE59`). Secure DFU packages are signed (ECDSA P-256) with
+  the vendor's key; the bootloader rejects anything else.
+* **PRO 2** (Ricky's bottle, model `HidrateSpark PRO 2`, hardware `Sensor-SM-V1`, firmware
+  `100.64.0`, read 2026-09-03) is different: no Nordic services at all, but it exposes the
+  **Telink OTA service** (`00010203-0405-0607-0809-0A0B0C0D1912` / `…2B12`). That is the
+  stock OTA profile from the Telink BLE SDK (TLSR825x / TLSR9 family). This changes the
+  picture considerably:
+  * Telink's classic OTA protocol is simple and documented by the SDK: `FF00` firmware
+    version query, `FF01` OTA start, then 20-byte packets (2-byte index, 16 data bytes,
+    CRC16), `FF02` OTA end. It is what the community web flashers for Telink-based
+    thermometers (pvvx's ATC firmware) use.
+  * Whether *this* bootloader verifies a signature is unknown. Older Telink SDKs only
+    check a CRC and a firmware "flag" byte; newer ones support secure boot. The first
+    experiment is to read the OTA characteristic and issue `FF00` to see if a version
+    comes back; the second is a teardown or the FCC ID to identify the exact SoC.
+  * Telink chips are programmed over a single-wire "SWS" interface with a cheap
+    programmer, and flash readback is possible unless protected. A dump of the shipping
+    firmware makes the OTA path far safer (you can always restore it).
+  * Risk: a failed unsigned OTA can brick the puck. Do not push anything until you have
+    a full flash dump via SWS and know the bootloader's expectations.
 
 ## Paths to custom firmware
 

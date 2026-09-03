@@ -63,6 +63,15 @@ final class AppState {
         }
     }
 
+    var readUnknownOnConnect: Bool {
+        didSet {
+            defaults.set(readUnknownOnConnect, forKey: Keys.readUnknown)
+            var options = model.client.options
+            options.readUnknownCharacteristicsOnConnect = readUnknownOnConnect
+            model.client.options = options
+        }
+    }
+
     var handshakeMode: BottleClientOptions.HandshakeMode {
         didSet {
             defaults.set(handshakeMode.rawValue, forKey: Keys.handshake)
@@ -86,6 +95,7 @@ final class AppState {
         static let capacity = "app.capacityML"
         static let handshake = "app.handshakeMode"
         static let exploreAll = "app.exploreAllCharacteristics"
+        static let readUnknown = "app.readUnknownOnConnect"
         static let tracker = "app.trackerConfiguration"
     }
 
@@ -99,6 +109,9 @@ final class AppState {
         let exploreAll = UserDefaults.standard.bool(forKey: Keys.exploreAll)
         options.subscribeToAllNotifying = exploreAll
         exploreAllCharacteristics = exploreAll
+        let readUnknown = UserDefaults.standard.object(forKey: Keys.readUnknown) as? Bool ?? true
+        options.readUnknownCharacteristicsOnConnect = readUnknown
+        readUnknownOnConnect = readUnknown
         model = HidrateBottleModel(client: HidrateBottleClient(options: options))
 
         autoLogToHealth = defaults.object(forKey: Keys.autoLog) as? Bool ?? true

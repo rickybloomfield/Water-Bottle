@@ -44,6 +44,7 @@ struct SettingsView: View {
                 }
 
                 Section("Protocol") {
+                    Toggle("Read unknown characteristics on connect", isOn: $app.readUnknownOnConnect)
                     Toggle("Subscribe to all characteristics", isOn: $app.exploreAllCharacteristics)
                     Text("Exploration mode: also enables notifications on undecoded characteristics. Leave off if the bottle disconnects shortly after connecting. Applies on the next connection.")
                         .font(.footnote).foregroundStyle(.secondary)

@@ -24,6 +24,12 @@ public struct BottleClientOptions: Sendable, Equatable {
     /// Read the battery level this often while connected so the link never sits idle.
     /// Set to nil to disable.
     public var keepAliveInterval: TimeInterval? = 20
+    /// Poll the weight characteristic by reading it this often. PRO 2 firmware only
+    /// notifies weight every ~15 s, too slow for calibration and drink detection.
+    public var weightPollInterval: TimeInterval? = 3
+    /// After connecting, read every readable characteristic once and surface the values
+    /// as `rawValue` events. Cheap, and the fastest way to map unfamiliar firmware.
+    public var readUnknownCharacteristicsOnConnect = true
     public var readDeviceInformation = true
     /// Re-issue the connect request whenever the link drops. CoreBluetooth then connects
     /// again as soon as the bottle is back in range, including from the background on iOS.
@@ -73,6 +79,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     private var handshakeWorkItems: [DispatchWorkItem] = []
     private var deviceInformation: [String: String] = [:]
     private var keepAliveTimer: DispatchSourceTimer?
+    private var weightPollTimer: DispatchSourceTimer?
     private var connectAttemptStarted: Date?
     private var reconnectScanTimer: DispatchSourceTimer?
     private var reconnectScanActive = false
@@ -343,6 +350,36 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     private func stopKeepAlive() {
         keepAliveTimer?.cancel()
         keepAliveTimer = nil
+        weightPollTimer?.cancel()
+        weightPollTimer = nil
+    }
+
+    private func startWeightPolling() {
+        guard let interval = _options.weightPollInterval, interval > 0,
+              let weight = characteristic(HidrateUUID.weight), weight.properties.contains(.read) else { return }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 1, repeating: interval)
+        timer.setEventHandler { [weak self] in
+            guard let self, let peripheral = self.peripheral, peripheral.state == .connected else { return }
+            peripheral.readValue(for: weight)
+        }
+        timer.resume()
+        weightPollTimer = timer
+        log(.info, "Polling weight every \(Int(interval))s")
+    }
+
+    private func readUnknownCharacteristics() {
+        guard let peripheral else { return }
+        let decoded: Set<String> = Set(
+            ([HidrateUUID.batteryLevel, HidrateUUID.weight] + HidrateUUID.deviceInformationCharacteristics)
+                .map(HidrateUUID.normalize)
+        )
+        let readable = characteristics.values
+            .filter { $0.properties.contains(.read) && !decoded.contains($0.uuid.uuidString) }
+            .sorted { $0.uuid.uuidString < $1.uuid.uuidString }
+        guard !readable.isEmpty else { return }
+        log(.info, "Reading \(readable.count) other readable characteristics")
+        for c in readable { peripheral.readValue(for: c) }
     }
 
     private static func describe(_ error: Error?) -> String {
@@ -561,7 +598,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
 
         var wanted: [String] = []
         if let dataCharacteristicUUID { wanted.append(dataCharacteristicUUID) }
-        wanted.append(contentsOf: [HidrateUUID.debug, HidrateUUID.weight])
+        wanted.append(contentsOf: [HidrateUUID.debug, HidrateUUID.weight, HidrateUUID.setPoint, HidrateUUID.sensorSecondary])
         if _options.subscribeToAllNotifying {
             wanted.append(contentsOf: characteristics.keys.sorted())
         }
@@ -578,6 +615,10 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         state = .ready(protocolPath)
         log(.info, "Ready. Sip path: \(protocolPath?.rawValue ?? "none")")
         startKeepAlive()
+        startWeightPolling()
+        if _options.readUnknownCharacteristicsOnConnect {
+            queue.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.readUnknownCharacteristics() }
+        }
     }
 
     private func handleSipFrame(_ data: Data) {
@@ -771,6 +812,12 @@ extension HidrateBottleClient: CBPeripheralDelegate {
         if characteristic.isNotifying, uuid == dataCharacteristicUUID, _options.autoDrainSips, !initialDrainDone {
             initialDrainDone = true
             write(uuid, Data([0x57]))
+            if characteristic.properties.contains(.read) {
+                queue.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    guard let self, let peripheral = self.peripheral, let c = self.characteristic(uuid) else { return }
+                    peripheral.readValue(for: c)
+                }
+            }
         }
     }
 

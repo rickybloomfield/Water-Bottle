@@ -29,6 +29,15 @@ public enum HidrateUUID {
     public static let nordicUARTService = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E"
     /// Nordic Secure DFU service. Its presence tells us how firmware updates are delivered.
     public static let nordicDFUService = "FE59"
+    /// Telink OTA service (PRO 2, firmware 100.x): the puck is a Telink SoC, not a Nordic one.
+    public static let telinkOTAService = "00010203-0405-0607-0809-0A0B0C0D1912"
+    /// PRO 2: nine read-only characteristics `6AA5000x`, contents unknown (calibration/vendor data?).
+    public static let vendorInfoService = "87290102-3C51-43B1-A1A9-11B9DC38478B"
+    /// PRO 2: unknown command-style service A (one write, one read/write characteristic).
+    public static let commandServiceA = "3BBD83E0-09BD-4B2D-A4E2-03E37694252B"
+    /// PRO 2: unknown command-style service B (same shape as A).
+    public static let commandServiceB = "3BBD83F0-09BD-4B2D-A4E2-03E37694252B"
+    public static let txPowerService = "1804"
 
     // MARK: - Characteristics
 
@@ -58,6 +67,19 @@ public enum HidrateUUID {
     public static let nordicUARTTX = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
     public static let nordicDFUControlPoint = "8EC90001-F315-4F60-9FB8-838830DAEA50"
     public static let nordicButtonlessDFU = "8EC90003-F315-4F60-9FB8-838830DAEA50"
+    /// Telink OTA control/data characteristic (read, write-without-response, notify).
+    public static let telinkOTA = "00010203-0405-0607-0809-0A0B0C0D2B12"
+    /// PRO 2: second sensor characteristic next to weight (read, notify). Meaning unknown.
+    public static let sensorSecondary = "2007A063-4E2D-4636-981A-35E93D1C7B94"
+    /// Reference service: 6 bytes read/write, contents unknown.
+    public static let referenceConfig = "316C4914-1F59-462E-AF06-185418674C0C"
+    /// LED service: state read-back.
+    public static let ledState = "B810E826-CF05-4B46-A725-07BC0FA2E5D9"
+    public static let commandA1 = "3BBD83E1-09BD-4B2D-A4E2-03E37694252B"
+    public static let commandA2 = "3BBD83E2-09BD-4B2D-A4E2-03E37694252B"
+    public static let commandB1 = "3BBD83F1-09BD-4B2D-A4E2-03E37694252B"
+    public static let commandB2 = "3BBD83F2-09BD-4B2D-A4E2-03E37694252B"
+    public static let txPowerLevel = "2A07"
 
     /// Device Information characteristics worth reading once per connection.
     public static let deviceInformationCharacteristics = [
@@ -106,7 +128,24 @@ public enum HidrateUUID {
             nordicUARTTX: "Nordic UART TX",
             nordicDFUControlPoint: "DFU Control Point",
             nordicButtonlessDFU: "Buttonless DFU",
+            telinkOTAService: "Telink OTA Service",
+            telinkOTA: "Telink OTA",
+            vendorInfoService: "Vendor Info Service (PRO 2)",
+            commandServiceA: "Command Service A (PRO 2, unknown)",
+            commandServiceB: "Command Service B (PRO 2, unknown)",
+            commandA1: "Command A1 (write)",
+            commandA2: "Command A2 (read/write)",
+            commandB1: "Command B1 (write)",
+            commandB2: "Command B2 (read/write)",
+            sensorSecondary: "Sensor 2 (unknown)",
+            referenceConfig: "Reference Config (6 bytes)",
+            ledState: "LED State",
+            txPowerService: "Tx Power",
+            txPowerLevel: "Tx Power Level",
         ]
+        for i in 1...10 {
+            table[String(format: "6AA5%04X-6352-4D57-A7B4-003A416FBB0B", i)] = "Vendor Info \(i)"
+        }
         table = Dictionary(uniqueKeysWithValues: table.map { (normalize($0.key), $0.value) })
         return table
     }()

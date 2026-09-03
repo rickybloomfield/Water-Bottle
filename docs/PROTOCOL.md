@@ -50,6 +50,32 @@ Sources: [HydroSync](https://github.com/maxperron/HydroSync) (handshake bytes),
 The SDK subscribes to every notifying characteristic and surfaces the unknown ones as
 "undecoded values" so new firmware behaviour is visible immediately.
 
+## HidrateSpark PRO 2 (firmware 100.64.0) GATT table
+
+Read from Ricky's bottle `h2o00008823` on 2026-09-03 (Device Information: manufacturer
+`HidrateSmart LLC`, model `HidrateSpark PRO 2`, hardware `Sensor-SM-V1`, firmware
+`100.64.0`). It differs materially from the community's PRO v1 / 80.18 table above:
+
+| Service | Characteristics | Notes |
+|---|---|---|
+| `87290102-3C51-43B1-A1A9-11B9DC38478B` | `6AA50001…000A` (9 × read) | Unknown read-only block (vendor / calibration data?). |
+| `1804` Tx Power | `2A07` read | Standard. |
+| `00010203-0405-0607-0809-0A0B0C0D1912` | `…0C0D2B12` read, writeNR, notify | **Telink OTA service.** The puck is a Telink SoC (see FIRMWARE.md). |
+| `3BBD83E0-09BD-4B2D-A4E2-03E37694252B` | `…83E1` write; `…83E2` read/write/writeNR | Unknown command channel A. |
+| `3BBD83F0-…` | `…83F1` write; `…83F2` read/write/writeNR | Unknown command channel B. |
+| `180A` Device Information | 2A24, 2A25, 2A26, 2A27, 2A29 | As above. |
+| `180F` Battery | `2A19` read/notify | 86 % at the time. |
+| `45855422-…` Reference | `016E11B1` read/write/notify (Data Point, **legacy path**); `316C4914` read/write; `B44B03F0` write/**notify** (Set Point) | No `BF2D1BA0` user service, so the legacy sip channel is used. Set Point can notify (command replies?). |
+| `4F817071-…` LED | `A1D9A5BF` write; `B810E826` read/write | As above. |
+| `593F756E-…` Debug | `E3578B0D` read/write/notify | Own service, like the Spark 3. |
+| `F65399A1-…` Sensor | `1807A063` read/notify (weight); `2007A063` read/notify (unknown) | Weight notifies only every ~15 s (raw ≈ 24990 at the time), so the SDK polls it by reading every 3 s. |
+
+Absent: Nordic DFU (`FE59`), Nordic UART, Environmental Sensing, accelerometer characteristics.
+
+Open questions being logged by the app: whether `0x57` on Data Point returns records on
+this firmware (the first drain got no reply), what Set Point notifies, and what
+`2007A063`, the `3BBD…` channels and the `6AA5…` block contain.
+
 ## Handshake (required before sip records flow)
 
 13 writes, 50 ms apart, captured from the official app and replayed verbatim by every
