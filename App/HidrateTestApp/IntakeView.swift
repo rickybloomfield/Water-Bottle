@@ -67,9 +67,14 @@ struct IntakeView: View {
     private func entryRow(_ entry: IntakeEntry) -> some View {
         HStack {
             VStack(alignment: .leading) {
-                Text(Format.mlAndOz(entry.volumeML)).font(.headline)
+                HStack(spacing: 4) {
+                    Text(Format.mlAndOz(entry.volumeML)).font(.headline)
+                    if entry.approximate {
+                        Text("≈").font(.headline).foregroundStyle(.orange)
+                    }
+                }
                 HStack(spacing: 6) {
-                    Text(entry.source.title)
+                    Text(entry.approximate ? "\(entry.source.title) (recovered)" : entry.source.title)
                     if let before = entry.rawBefore, let after = entry.rawAfter {
                         Text("· \(before) → \(after)")
                     }

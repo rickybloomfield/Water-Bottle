@@ -53,6 +53,18 @@ struct StableWeightFilterTests {
     }
 }
 
+@Suite("Drift model")
+struct DriftModelTests {
+    @Test func correctsForDriftButNeverGoesNegative() {
+        let drift = DriftModel(mlPerMinute: 15, maxGapSeconds: 3600)
+        // Over 4 minutes, 60 mL of the observed drop is drift.
+        #expect(abs(drift.correctedDrop(observedDrop: 200, gapSeconds: 240) - 140) < 0.01)
+        // Pure drift, no real drink: corrected drop is ~0, not negative.
+        #expect(drift.correctedDrop(observedDrop: 60, gapSeconds: 240) <= 0.01)
+        #expect(drift.correctedDrop(observedDrop: 10, gapSeconds: 600) <= 0.01)
+    }
+}
+
 @Suite("Level tracker")
 struct LevelTrackerTests {
     let t0 = Date(timeIntervalSince1970: 1_000_000)

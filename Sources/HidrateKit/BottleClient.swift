@@ -215,8 +215,31 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     @discardableResult
     public func reconnectLastBottle() -> Bool {
         guard let id = lastBottleIdentifier else { return false }
-        connect(to: id)
+        connect(to: id, name: lastBottleName)
         return true
+    }
+
+    /// Kick a stalled reconnect. Safe to call often (e.g. when the app returns to the
+    /// foreground). If a connect has been pending too long, it is cancelled and re-issued,
+    /// and the by-name reconnect scan is (re)started.
+    public func nudgeReconnect() {
+        queue.async {
+            guard self.wantsConnection, self.central.state == .poweredOn else { return }
+            if self.sessionActive { return }
+            let pendingFor = self.connectAttemptStarted.map { Date().timeIntervalSince($0) } ?? .infinity
+            if let pending = self.peripheral, pending.state == .connecting {
+                if pendingFor > 20 {
+                    self.log(.info, "Reconnect pending \(Int(pendingFor))s; re-issuing")
+                    self.manualRetryInProgress = true
+                    self.central.cancelPeripheralConnection(pending)
+                    self.queue.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.attemptConnection() }
+                } else {
+                    self.startReconnectScan()
+                }
+            } else {
+                self.attemptConnection()
+            }
+        }
     }
 
     public func forgetLastBottle() {

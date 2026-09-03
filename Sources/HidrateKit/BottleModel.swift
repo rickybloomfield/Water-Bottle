@@ -8,18 +8,11 @@ public struct LevelChangeEvent: Sendable, Identifiable, Hashable {
     public let date: Date
     public let change: LevelChange
     public let stableRaw: Int
+    /// True when the volume was reconstructed across a disconnect (drift-corrected estimate).
+    public var approximate: Bool = false
 
-    public var volumeML: Double {
-        switch change {
-        case .baseline: 0
-        case .drink(let v, _, _), .refill(let v, _, _): v
-        }
-    }
-
-    public var isDrink: Bool {
-        if case .drink = change { return true }
-        return false
-    }
+    public var volumeML: Double { change.volumeML }
+    public var isDrink: Bool { change.isDrink }
 }
 
 /// Main-actor, observable view of one bottle: connection state, live readings,
@@ -76,6 +69,12 @@ public final class HidrateBottleModel {
         set { tracker.configuration = newValue }
     }
 
+    /// Drift model used to recover drinks/refills that happened while disconnected.
+    public var driftModel = DriftModel()
+    /// Recover level changes measured across a disconnect. On by default because the PRO 2
+    /// disconnects every ~15 minutes, so many drinks happen while briefly away.
+    public var recoverAcrossDisconnects = true
+
     public var stabilityTolerance: Int {
         get { filter.tolerance }
         set { filter.tolerance = newValue }
@@ -90,6 +89,7 @@ public final class HidrateBottleModel {
     // agreeing samples within ±8 is the practical definition of "settled".
     private var filter = StableWeightFilter(tolerance: 8, requiredSamples: 2)
     private var tracker = LevelTracker()
+    private var pendingRecoveryCheck = false
     private var stableSubscribers: [UUID: AsyncStream<Int>.Continuation] = [:]
     private var eventTask: Task<Void, Never>?
     private let store: CalibrationStore?
@@ -250,7 +250,13 @@ public final class HidrateBottleModel {
             bottles.sort { $0.rssi > $1.rssi }
         case .connection(let state):
             if state != connectionState { connectionStateChangedAt = Date() }
+            let wasReady = { if case .ready = connectionState { return true } else { return false } }()
             connectionState = state
+            if case .ready = state, !wasReady {
+                // New live session: the next settled resting reading should be checked
+                // against the level saved before we disconnected.
+                pendingRecoveryCheck = recoverAcrossDisconnects
+            }
             if !state.isConnected {
                 filter.reset()
                 stableStreak = 0
@@ -296,16 +302,44 @@ public final class HidrateBottleModel {
     private func trackLevel(raw: Int, at date: Date) {
         guard let calibration, calibration.isValid else { return }
         let levelML = calibration.milliliters(forRaw: Double(raw))
-        guard let change = tracker.ingest(levelML: levelML, at: date) else {
+        let change = tracker.ingest(levelML: levelML, at: date)
+
+        // Only settled *resting* readings are trustworthy anchors for cross-disconnect
+        // recovery and for the persisted last level; skip while the bottle is handled.
+        if !tracker.isBottleHandled {
+            if pendingRecoveryCheck {
+                pendingRecoveryCheck = false
+                recoverAcrossGap(currentLevelML: tracker.baselineML ?? levelML, at: date)
+            }
             store?.saveBaselineML(tracker.baselineML)
-            return
+            store?.saveLastLevel(tracker.baselineML ?? levelML, date: date)
         }
-        store?.saveBaselineML(tracker.baselineML)
+
+        guard let change, !change.isBaseline else { return }
         let event = LevelChangeEvent(id: UUID(), date: date, change: change, stableRaw: raw)
-        if case .baseline = change {
-            return
-        }
         levelChanges.insert(event, at: 0)
         onLevelChange?(event)
+    }
+
+    private func recoverAcrossGap(currentLevelML: Double, at date: Date) {
+        guard let previous = store?.loadLastLevel() else { return }
+        let gap = date.timeIntervalSince(previous.date)
+        guard gap > 30, gap <= driftModel.maxGapSeconds else { return }
+        let observedDrop = previous.levelML - currentLevelML
+        let config = tracker.configuration
+        if observedDrop > 0 {
+            let corrected = driftModel.correctedDrop(observedDrop: observedDrop, gapSeconds: gap)
+            guard corrected >= config.minDrinkML else { return }
+            let midpoint = previous.date.addingTimeInterval(gap / 2)
+            let change = LevelChange.drink(volumeML: corrected, fromML: previous.levelML, toML: currentLevelML)
+            let event = LevelChangeEvent(id: UUID(), date: midpoint, change: change, stableRaw: 0, approximate: true)
+            levelChanges.insert(event, at: 0)
+            onLevelChange?(event)
+        } else if -observedDrop >= config.minRefillML {
+            let change = LevelChange.refill(volumeML: -observedDrop, fromML: previous.levelML, toML: currentLevelML)
+            let event = LevelChangeEvent(id: UUID(), date: date, change: change, stableRaw: 0, approximate: true)
+            levelChanges.insert(event, at: 0)
+            onLevelChange?(event)
+        }
     }
 }

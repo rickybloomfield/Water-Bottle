@@ -26,6 +26,7 @@ struct IntakeEntry: Identifiable, Codable, Hashable {
     var rawBefore: Int?
     var rawAfter: Int?
     var healthError: String?
+    var approximate: Bool = false
 }
 
 enum IntakeSource: String, CaseIterable, Identifiable {
@@ -157,11 +158,11 @@ final class AppState {
     var todayTotalML: Double { todayEntries.reduce(0) { $0 + $1.volumeML } }
 
     private func handle(_ event: LevelChangeEvent) {
-        sessionLog.write("levelChange \(event.change) raw=\(event.stableRaw)")
+        sessionLog.write("levelChange \(event.change)\(event.approximate ? " [recovered]" : "") raw=\(event.stableRaw)")
         guard intakeSource == .weight, case .drink(let volume, let from, let to) = event.change else { return }
         let entry = IntakeEntry(
             id: event.id, date: event.date, volumeML: volume.rounded(), source: .weight,
-            rawBefore: Int(from.rounded()), rawAfter: Int(to.rounded())
+            rawBefore: Int(from.rounded()), rawAfter: Int(to.rounded()), approximate: event.approximate
         )
         add(entry)
     }

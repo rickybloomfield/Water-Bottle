@@ -95,6 +95,38 @@ public enum LevelChange: Sendable, Hashable {
     case drink(volumeML: Double, fromML: Double, toML: Double)
     /// Water was added.
     case refill(volumeML: Double, fromML: Double, toML: Double)
+
+    public var volumeML: Double {
+        switch self {
+        case .baseline: 0
+        case .drink(let v, _, _), .refill(let v, _, _): v
+        }
+    }
+
+    public var isDrink: Bool { if case .drink = self { true } else { false } }
+    public var isRefill: Bool { if case .refill = self { true } else { false } }
+    public var isBaseline: Bool { if case .baseline = self { true } else { false } }
+}
+
+/// Drift compensation for the PRO 2 load cell, whose resting reading falls slowly after
+/// handling. Used when recovering a level change measured across a disconnect gap.
+public struct DriftModel: Sendable, Equatable, Codable {
+    /// How fast the resting reading falls on its own, in mL per minute (downward = positive).
+    public var mlPerMinute: Double
+    /// Don't attempt drift-corrected recovery across gaps longer than this.
+    public var maxGapSeconds: TimeInterval
+
+    public init(mlPerMinute: Double = 15, maxGapSeconds: TimeInterval = 3600) {
+        self.mlPerMinute = mlPerMinute
+        self.maxGapSeconds = maxGapSeconds
+    }
+
+    /// Correct an observed drop for drift over a gap. The correction never turns a real
+    /// drop negative (it is clamped to the observed drop).
+    public func correctedDrop(observedDrop: Double, gapSeconds: TimeInterval) -> Double {
+        let drift = mlPerMinute * gapSeconds / 60
+        return observedDrop - min(drift, max(observedDrop, 0))
+    }
 }
 
 /// Turns calibrated level samples into drink and refill events.
@@ -156,6 +188,7 @@ public struct LevelTracker: Sendable {
     /// The level the next change is measured against.
     public private(set) var baselineML: Double?
     public private(set) var isHandling = false
+    public var isBottleHandled: Bool { isHandling }
     private var lastSampleAt: Date?
     private var recent: [Double] = []
     /// A sample that arrived at slow cadence. It is only a rest reading if the *next*
