@@ -142,8 +142,22 @@ app's full initialisation. Ours was too sparse, and we used the wrong sip bytes.
   bottle never queues a sip record for a third party, so intake is **weight-only** in
   practice. With the full init (2 s weight) and a fresh calibration this is reliable: 50 mL
   and 41 mL drinks were detected and logged on 2026-09-03.
-* **LED is host-driven**: write one byte to LED control `A1D9A5BF…`. The official app wrote
-  `b0` and `47`; the code for a blue drink-confirmation glow is not yet identified.
+* **LED is host-driven**: write one byte to LED control `A1D9A5BF…`. Each byte is a firmware
+  preset (colour + animation + duration bundled); duration is not separately settable.
+  Mapped on this PRO 2 (2026-09-03):
+
+  | Byte(s) | Effect | Likely use |
+  |---|---|---|
+  | `0x0D`, `0x8D` | Blue circle then green blink | Daily goal reached |
+  | `0xA9` | Blue blinks | — |
+  | `0xAC`, `0x29`, `0x2C`, `0x47` | Blue flashes | Drink reminder |
+  | `0xB0`, `0x30` | Blue glow | Sip taken (drink success) |
+  | `0xB4` | Green glow | Calibration success |
+  | `0xBD` | Red flash | Error |
+  | `0x00` | (nothing) | Off / stop |
+
+  `LEDPattern` exposes the named presets; the app flashes `0xB0` on a logged drink and
+  `0xB4` on a successful calibration.
 
 ## Handshake (required before sip records flow)
 

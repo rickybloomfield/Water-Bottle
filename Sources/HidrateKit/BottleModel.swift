@@ -163,7 +163,7 @@ public final class HidrateBottleModel {
 
     public func disconnect() { client.disconnect() }
     public func drainSips() { client.drainSips() }
-    public func pulseLED(_ pattern: LEDPattern = .shortPulseWhite) { client.setLED(pattern) }
+    public func pulseLED(_ pattern: LEDPattern = .drinkSuccess) { client.setLED(pattern) }
 
     public func clearLogs() { logs = [] }
     public func clearRawValues() { rawValues = [] }

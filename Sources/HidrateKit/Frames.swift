@@ -146,18 +146,33 @@ public enum CapState: String, Sendable, Hashable {
 
 /// LED patterns accepted on the LED control characteristic. Only the first two are
 /// confirmed to do anything on current firmware.
+/// LED presets on the HidrateSpark PRO 2, mapped by observation on 2026-09-03. Several
+/// presets have more than one byte that triggers them; the alternates are listed in the
+/// comments. Writing the raw value to the LED control characteristic plays the preset.
 public enum LEDPattern: UInt8, Sendable, CaseIterable, Identifiable {
-    case shortPulseWhite = 0x02
-    case shortStrobeRed = 0x16
-    case tripleTriplePulse = 0x34
+    /// Blue circle then a green blink. Alternate: 0x8D. Likely the daily-goal celebration.
+    case goalAchieved = 0x0D
+    /// Blue blinks.
+    case blueBlinks = 0xA9
+    /// Blue flashes. Alternates: 0x29, 0x2C, 0x47. The drink-reminder animation.
+    case drinkReminder = 0xAC
+    /// Blue glow. Alternate: 0x30. Used when a sip is taken — the drink-success light.
+    case drinkSuccess = 0xB0
+    /// Green glow. Used here to confirm a successful calibration.
+    case calibrationSuccess = 0xB4
+    /// Red flash. An error indicator.
+    case error = 0xBD
 
     public var id: UInt8 { rawValue }
 
     public var title: String {
         switch self {
-        case .shortPulseWhite: "Short white pulse"
-        case .shortStrobeRed: "Short red strobe"
-        case .tripleTriplePulse: "Three triple pulses"
+        case .goalAchieved: "Goal reached (blue circle, green blink)"
+        case .blueBlinks: "Blue blinks"
+        case .drinkReminder: "Drink reminder (blue flashes)"
+        case .drinkSuccess: "Drink logged (blue glow)"
+        case .calibrationSuccess: "Calibration OK (green glow)"
+        case .error: "Error (red flash)"
         }
     }
 }

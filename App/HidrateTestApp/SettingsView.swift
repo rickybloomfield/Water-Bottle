@@ -10,6 +10,15 @@ struct SettingsView: View {
             Form {
                 Section("Drink LED flash") {
                     Toggle("Flash bottle LED on drink", isOn: $app.flashLEDOnDrink)
+                    Picker("Light", selection: Binding(
+                        get: { LEDPattern(rawValue: UInt8(app.drinkLEDByte & 0xFF)) },
+                        set: { if let p = $0 { app.drinkLEDByte = Int(p.rawValue) } }
+                    )) {
+                        ForEach(LEDPattern.allCases) { Text($0.title).tag(Optional($0)) }
+                        if LEDPattern(rawValue: UInt8(app.drinkLEDByte & 0xFF)) == nil {
+                            Text(String(format: "Custom 0x%02X", app.drinkLEDByte)).tag(Optional<LEDPattern>.none)
+                        }
+                    }
                     Stepper(value: $app.drinkLEDByte, in: 0...255) {
                         LabeledContent("Colour byte", value: String(format: "0x%02X", app.drinkLEDByte))
                     }

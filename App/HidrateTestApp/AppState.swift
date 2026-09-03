@@ -125,7 +125,7 @@ final class AppState {
         options.readUnknownCharacteristicsOnConnect = readUnknown
         readUnknownOnConnect = readUnknown
         flashLEDOnDrink = defaults.object(forKey: Keys.flashLED) as? Bool ?? true
-        drinkLEDByte = defaults.object(forKey: Keys.ledByte) as? Int ?? 0xB0   // 0xB0 = blue (from the sniff)
+        drinkLEDByte = defaults.object(forKey: Keys.ledByte) as? Int ?? Int(LEDPattern.drinkSuccess.rawValue)
         ledStopEnabled = defaults.object(forKey: Keys.ledStop) as? Bool ?? true
         ledStopByte = defaults.object(forKey: Keys.ledStopByte) as? Int ?? 0x00 // best guess for "off"
         ledStopDelay = defaults.object(forKey: Keys.ledStopDelay) as? Double ?? 2.0
@@ -136,6 +136,12 @@ final class AppState {
         minimumLogML = defaults.object(forKey: Keys.minimumLog) as? Double ?? 15
         capacityML = defaults.object(forKey: Keys.capacity) as? Double ?? BottleCalibration.capacityML(ounces: 21)
 
+        // One-time: adopt the confirmed blue-glow drink colour (0xB0) for anyone who was
+        // left on an exploratory byte before the LED map was known.
+        if !defaults.bool(forKey: "app.migratedDrinkLED") {
+            defaults.set(true, forKey: "app.migratedDrinkLED")
+            drinkLEDByte = Int(LEDPattern.drinkSuccess.rawValue)
+        }
         let support = (try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
             ?? FileManager.default.temporaryDirectory
         entriesURL = support.appendingPathComponent("intake-entries.json")
@@ -290,6 +296,7 @@ final class AppState {
         let calibration = BottleCalibration(emptyRaw: emptyRaw, fullRaw: fullRaw, capacityML: capacityML)
         sessionLog.write(String(format: "calibration saved empty=%.1f full=%.1f capacity=%.0f scale=%.3f raw/mL", emptyRaw, fullRaw, capacityML, calibration.rawUnitsPerML))
         model.calibration = calibration
+        if model.isConnected { model.client.setLED(.calibrationSuccess) }  // green glow
     }
 
     func clearCalibration() {
