@@ -678,7 +678,14 @@ extension HidrateBottleClient: CBCentralManagerDelegate {
                 scanRequested = false
                 startScanning()
             }
-            if wantsConnection, peripheral?.state != .connected { attemptConnection() }
+            if let restored = peripheral, restored.state == .connected {
+                log(.info, "Restored connection to \(restored.name ?? "bottle"); discovering services")
+                resetSessionState()
+                state = .discoveringServices
+                restored.discoverServices(nil)
+            } else if wantsConnection {
+                attemptConnection()
+            }
         case .poweredOff, .unauthorized, .unsupported:
             if peripheral != nil || state.isConnected {
                 resetSessionState()
@@ -699,9 +706,11 @@ extension HidrateBottleClient: CBCentralManagerDelegate {
         targetIdentifier = first.identifier
         targetName = targetName ?? first.name ?? lastBottleName
         wantsConnection = true
+        // Do not talk to the peripheral yet: this callback arrives before the central
+        // reports poweredOn, and requests made before that are dropped silently.
+        // centralManagerDidUpdateState picks the connected peripheral up.
         if first.state == .connected {
             state = .discoveringServices
-            first.discoverServices(nil)
         }
     }
 
