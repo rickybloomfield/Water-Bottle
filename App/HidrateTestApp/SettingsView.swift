@@ -8,14 +8,23 @@ struct SettingsView: View {
         @Bindable var app = app
         NavigationStack {
             Form {
-                Section("Feedback") {
+                Section("Drink LED flash") {
                     Toggle("Flash bottle LED on drink", isOn: $app.flashLEDOnDrink)
                     Stepper(value: $app.drinkLEDByte, in: 0...255) {
-                        LabeledContent("LED byte", value: String(format: "0x%02X (%d)", app.drinkLEDByte, app.drinkLEDByte))
+                        LabeledContent("Colour byte", value: String(format: "0x%02X", app.drinkLEDByte))
                     }
-                    Button("Test this LED byte") { app.model.client.setLED(rawByte: UInt8(app.drinkLEDByte & 0xFF)) }
+                    Toggle("Stop the flash after a delay", isOn: $app.ledStopEnabled)
+                    if app.ledStopEnabled {
+                        Stepper(value: $app.ledStopByte, in: 0...255) {
+                            LabeledContent("Stop byte", value: String(format: "0x%02X", app.ledStopByte))
+                        }
+                        Stepper(value: $app.ledStopDelay, in: 0.5...5, step: 0.5) {
+                            LabeledContent("Stop after", value: String(format: "%.1f s", app.ledStopDelay))
+                        }
+                    }
+                    Button("Test flash now") { app.flashDrinkLED() }
                         .disabled(!app.model.isConnected)
-                    Text("The PRO 2 LED code for blue is not yet known. Use the LED sweeper in the Explore tab to find it, then set it here.")
+                    Text("From the sniff: 0xB0 is blue (it loops), 0x47 is red. The flash sends the colour byte, then the stop byte after the delay so it does not blink forever. Tune the bytes here if 0xB0 / 0x00 aren't right.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
 

@@ -75,6 +75,9 @@ final class AppState {
 
     var flashLEDOnDrink: Bool { didSet { defaults.set(flashLEDOnDrink, forKey: Keys.flashLED) } }
     var drinkLEDByte: Int { didSet { defaults.set(drinkLEDByte, forKey: Keys.ledByte) } }
+    var ledStopEnabled: Bool { didSet { defaults.set(ledStopEnabled, forKey: Keys.ledStop) } }
+    var ledStopByte: Int { didSet { defaults.set(ledStopByte, forKey: Keys.ledStopByte) } }
+    var ledStopDelay: Double { didSet { defaults.set(ledStopDelay, forKey: Keys.ledStopDelay) } }
 
     var handshakeMode: BottleClientOptions.HandshakeMode {
         didSet {
@@ -102,6 +105,9 @@ final class AppState {
         static let readUnknown = "app.readUnknownOnConnect"
         static let flashLED = "app.flashLEDOnDrink"
         static let ledByte = "app.drinkLEDByte"
+        static let ledStop = "app.ledStopEnabled"
+        static let ledStopByte = "app.ledStopByte"
+        static let ledStopDelay = "app.ledStopDelay"
         static let tracker = "app.trackerConfiguration"
     }
 
@@ -119,7 +125,10 @@ final class AppState {
         options.readUnknownCharacteristicsOnConnect = readUnknown
         readUnknownOnConnect = readUnknown
         flashLEDOnDrink = defaults.object(forKey: Keys.flashLED) as? Bool ?? true
-        drinkLEDByte = defaults.object(forKey: Keys.ledByte) as? Int ?? 0x02
+        drinkLEDByte = defaults.object(forKey: Keys.ledByte) as? Int ?? 0xB0   // 0xB0 = blue (from the sniff)
+        ledStopEnabled = defaults.object(forKey: Keys.ledStop) as? Bool ?? true
+        ledStopByte = defaults.object(forKey: Keys.ledStopByte) as? Int ?? 0x00 // best guess for "off"
+        ledStopDelay = defaults.object(forKey: Keys.ledStopDelay) as? Double ?? 2.0
         model = HidrateBottleModel(client: HidrateBottleClient(options: options))
 
         autoLogToHealth = defaults.object(forKey: Keys.autoLog) as? Bool ?? true
@@ -195,7 +204,7 @@ final class AppState {
     private func add(_ entry: IntakeEntry) {
         sessionLog.write("intake \(Int(entry.volumeML))mL source=\(entry.source.rawValue) autoLog=\(autoLogToHealth && entry.volumeML >= minimumLogML)")
         if flashLEDOnDrink, entry.source != .manual, model.isConnected {
-            model.client.setLED(rawByte: UInt8(drinkLEDByte & 0xFF))
+            flashDrinkLED()
         }
         entries.insert(entry, at: 0)
         if entries.count > 2000 { entries.removeLast(entries.count - 2000) }
@@ -241,6 +250,19 @@ final class AppState {
         entries.removeAll { $0.id == entry.id }
         model.removeLevelChange(id: entry.id)
         await refreshHealthTotal()
+    }
+
+    /// Flash the bottle LED for a drink: show the colour byte, then send the "off" byte
+    /// after a short delay so it does not keep looping.
+    func flashDrinkLED() {
+        model.client.setLED(rawByte: UInt8(drinkLEDByte & 0xFF))
+        guard ledStopEnabled else { return }
+        let stop = UInt8(ledStopByte & 0xFF)
+        let delay = ledStopDelay
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            self?.model.client.setLED(rawByte: stop)
+        }
     }
 
     // MARK: - HealthKit

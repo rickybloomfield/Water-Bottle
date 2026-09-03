@@ -6,10 +6,7 @@ struct ExploreView: View {
     @State private var writeUUID = HidrateUUID.ledControl
     @State private var writeHex = "02"
     @State private var minimumLevel: LogLevel = .debug
-    @State private var sweepRunning = false
-    @State private var sweepByte = 0
-    @State private var sweepInterval = 2.0
-    @State private var sweepLog: [(byte: Int, at: Date)] = []
+    @State private var sweepByte = 0xB0
 
     private var model: HidrateBottleModel { app.model }
 
@@ -95,61 +92,32 @@ struct ExploreView: View {
     }
 
     private var ledSweepSection: some View {
-        Section("LED sweeper (find blue)") {
+        Section("LED tester (manual, one byte at a time)") {
             HStack {
-                VStack(alignment: .leading) {
-                    Text(String(format: "0x%02X", sweepByte)).font(.system(.largeTitle, design: .monospaced)).bold()
-                    Text("byte \(sweepByte) of 255").font(.caption).foregroundStyle(.secondary)
-                }
+                Text(String(format: "0x%02X", sweepByte)).font(.system(.largeTitle, design: .monospaced)).bold()
+                Text("(\(sweepByte))").foregroundStyle(.secondary)
                 Spacer()
-                VStack(spacing: 8) {
-                    Button(sweepRunning ? "Stop" : "Start") { sweepRunning.toggle() }
-                        .buttonStyle(.borderedProminent)
-                        .tint(sweepRunning ? .red : .blue)
-                        .disabled(!model.isConnected)
-                    Button("Resend") { model.client.setLED(rawByte: UInt8(sweepByte & 0xFF)) }
-                        .buttonStyle(.bordered)
-                        .disabled(!model.isConnected)
-                }
-            }
-            Stepper(value: $sweepInterval, in: 1...6, step: 0.5) {
-                LabeledContent("Interval", value: String(format: "%.1f s", sweepInterval))
+                Button("Send / repeat") { model.client.setLED(rawByte: UInt8(sweepByte & 0xFF)) }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!model.isConnected)
             }
             HStack {
-                Button("Back one") { sweepByte = max(0, sweepByte - 1); model.client.setLED(rawByte: UInt8(sweepByte)) }
+                Button("−1") { sweepByte = max(0, sweepByte - 1) }
+                Button("+1") { sweepByte = min(255, sweepByte + 1) }
                 Spacer()
-                Button("Reset to 0") { sweepByte = 0; sweepLog = [] }
+                Button("Blue (0xB0)") { sweepByte = 0xB0 }
+                Button("Off (0x00)") { sweepByte = 0x00 }
             }
             .buttonStyle(.bordered)
-            .disabled(!model.isConnected)
-            Text(sweepRunning
-                 ? "Watch the bottle. When it does something, tap Stop, then use the list below to find the exact byte."
-                 : "Start sweeps one byte every interval. Recently sent bytes are listed below so you can identify the one that worked despite reaction lag.")
+            HStack {
+                Button("Use as drink colour") { app.drinkLEDByte = sweepByte }
+                Spacer()
+                Button("Use as stop byte") { app.ledStopByte = sweepByte }
+            }
+            .buttonStyle(.bordered)
+            .font(.footnote)
+            Text("Set the number, tap Send, and watch the bottle. The write can take a second or two to show. Nothing auto-advances, so the light you see always belongs to the byte shown above.")
                 .font(.footnote).foregroundStyle(.secondary)
-            if !sweepLog.isEmpty {
-                ForEach(Array(sweepLog.enumerated()), id: \.offset) { _, item in
-                    HStack {
-                        Text(String(format: "0x%02X (%d)", item.byte, item.byte)).font(.body.monospaced())
-                        Spacer()
-                        Text(Format.time.string(from: item.at)).font(.caption2).foregroundStyle(.secondary)
-                        Button("Resend") { model.client.setLED(rawByte: UInt8(item.byte & 0xFF)) }
-                            .buttonStyle(.borderless).font(.caption)
-                        Button("Use") { app.drinkLEDByte = item.byte }
-                            .buttonStyle(.borderless).font(.caption)
-                    }
-                }
-            }
-        }
-        .task(id: sweepRunning) {
-            guard sweepRunning else { return }
-            while sweepRunning && !Task.isCancelled {
-                if model.isConnected { model.client.setLED(rawByte: UInt8(sweepByte & 0xFF)) }
-                sweepLog.insert((sweepByte, Date()), at: 0)
-                if sweepLog.count > 12 { sweepLog.removeLast(sweepLog.count - 12) }
-                try? await Task.sleep(for: .seconds(sweepInterval))
-                if !sweepRunning || Task.isCancelled { break }
-                sweepByte = sweepByte >= 255 ? 0 : sweepByte + 1
-            }
         }
     }
 
