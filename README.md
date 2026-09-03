@@ -60,3 +60,19 @@ plus raw `read/write/setNotify` for exploration.
 ```bash
 swift test
 ```
+
+## Troubleshooting a session
+
+The app writes every event to `Documents/hidrate-session.log` inside its container.
+Export it from **Explore → ⋯ → Share session log**, or pull it over USB:
+
+```bash
+xcrun devicectl device copy from --device 00008140-000A7DD422D8801C \
+  --domain-type appDataContainer --domain-identifier com.rickybloomfield.HidrateTestApp \
+  --source Documents/hidrate-session.log --destination ./hidrate-session.log
+```
+
+If the bottle disconnects and stays in "Connecting": the bottle only advertises while no
+central is connected, so first make sure the official Hidrate app is force-quit (it
+reconnects in the background otherwise). Lifting the bottle or opening the cap usually
+wakes it up. **Retry now** cancels the pending connect and issues a fresh one.

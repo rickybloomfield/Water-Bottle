@@ -21,6 +21,9 @@ struct ExploreView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu("Options", systemImage: "ellipsis.circle") {
+                        ShareLink("Share session log (\(app.sessionLog.sizeDescription))", item: app.sessionLog.url)
+                        Button("Clear session log", role: .destructive) { app.sessionLog.clear() }
+                        Divider()
                         Button("Clear logs") { model.clearLogs() }
                         Button("Clear raw values") { model.clearRawValues() }
                         Button("Drain sips") { model.drainSips() }

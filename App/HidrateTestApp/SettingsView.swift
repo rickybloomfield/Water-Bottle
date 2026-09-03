@@ -44,6 +44,9 @@ struct SettingsView: View {
                 }
 
                 Section("Protocol") {
+                    Toggle("Subscribe to all characteristics", isOn: $app.exploreAllCharacteristics)
+                    Text("Exploration mode: also enables notifications on undecoded characteristics. Leave off if the bottle disconnects shortly after connecting. Applies on the next connection.")
+                        .font(.footnote).foregroundStyle(.secondary)
                     Picker("Handshake", selection: $app.handshakeMode) {
                         Text("Captured replay (default)").tag(BottleClientOptions.HandshakeMode.capturedReplay)
                         Text("Computed (real time of day)").tag(BottleClientOptions.HandshakeMode.computed)

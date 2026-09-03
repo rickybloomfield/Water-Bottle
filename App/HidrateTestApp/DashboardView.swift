@@ -49,6 +49,16 @@ struct DashboardView: View {
             }
             if model.isConnected {
                 Button("Disconnect", role: .destructive) { model.disconnect() }
+            } else if model.connectionState == .connecting {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text("Waiting for the bottle to advertise (\(elapsed(at: context.date))). It only advertises when nothing else is connected; make sure the official app is fully closed, and try lifting the bottle or opening the cap.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("Retry now") { model.reconnectLastBottle() }
+                    Spacer()
+                    Button("Cancel", role: .destructive) { model.disconnect() }
+                }
             } else if model.client.lastBottleIdentifier != nil {
                 Button("Reconnect last bottle") { model.reconnectLastBottle() }
             } else {
@@ -127,6 +137,11 @@ struct DashboardView: View {
                 }
             }
         }
+    }
+
+    private func elapsed(at date: Date) -> String {
+        let seconds = max(0, Int(date.timeIntervalSince(model.connectionStateChangedAt)))
+        return seconds < 60 ? "\(seconds)s" : "\(seconds / 60)m \(seconds % 60)s"
     }
 
     private var bluetoothLabel: String {

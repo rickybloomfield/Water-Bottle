@@ -52,6 +52,11 @@ public final class HidrateBottleModel {
     public var onLevelChange: (@MainActor (LevelChangeEvent) -> Void)?
     /// Called on the main actor for every sip record the bottle reports.
     public var onSip: (@MainActor (SipRecord) -> Void)?
+    /// Called on the main actor for every raw event, before the model processes it.
+    /// Useful for persisting a session log.
+    public var onEvent: (@MainActor (BottleEvent) -> Void)?
+    /// When the current connection attempt or session began.
+    public private(set) var connectionStateChangedAt = Date()
 
     public var maxLogEntries = 500
     public var maxRawValues = 200
@@ -216,6 +221,7 @@ public final class HidrateBottleModel {
     // MARK: - Event handling
 
     private func handle(_ event: BottleEvent) {
+        onEvent?(event)
         switch event {
         case .bluetoothState(let state):
             bluetoothState = state
@@ -230,6 +236,7 @@ public final class HidrateBottleModel {
             }
             bottles.sort { $0.rssi > $1.rssi }
         case .connection(let state):
+            if state != connectionState { connectionStateChangedAt = Date() }
             connectionState = state
             if !state.isConnected {
                 filter.reset()

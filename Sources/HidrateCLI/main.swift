@@ -7,7 +7,7 @@ import HidrateKit
 //   hidrate-cli scan [seconds]                 list bottles (or everything with --all)
 //   hidrate-cli monitor [name|uuid] [flags]    connect, handshake, and print every event
 //
-// Flags for monitor: --no-handshake  --computed-handshake  --no-drain  --quiet
+// Flags for monitor: --no-handshake  --computed-handshake  --no-drain  --known-only  --quiet
 //
 // The first run asks for Bluetooth permission on behalf of the terminal app.
 
@@ -32,6 +32,7 @@ func makeOptions() -> BottleClientOptions {
     if flags.contains("--no-handshake") { options.handshake = .none }
     if flags.contains("--computed-handshake") { options.handshake = .computed }
     options.autoDrainSips = !flags.contains("--no-drain")
+    options.subscribeToAllNotifying = !flags.contains("--known-only")
     return options
 }
 
@@ -127,6 +128,6 @@ default:
     hidrate-cli — talk to a HidrateSpark bottle from the Mac
 
       hidrate-cli scan [seconds] [--all]
-      hidrate-cli monitor [name|uuid] [--no-handshake] [--computed-handshake] [--no-drain] [--quiet]
+      hidrate-cli monitor [name|uuid] [--no-handshake] [--computed-handshake] [--no-drain] [--known-only] [--quiet]
     """)
 }

@@ -19,7 +19,11 @@ public struct BottleClientOptions: Sendable, Equatable {
     /// Write `0x57` automatically after subscribing and after every pending-record frame.
     public var autoDrainSips = true
     /// Subscribe to every notify/indicate characteristic, decoded or not (exploration mode).
-    public var subscribeToAllNotifying = true
+    /// Off by default: some firmware drops the link when unusual characteristics are enabled.
+    public var subscribeToAllNotifying = false
+    /// Read the battery level this often while connected so the link never sits idle.
+    /// Set to nil to disable.
+    public var keepAliveInterval: TimeInterval? = 20
     public var readDeviceInformation = true
     /// Re-issue the connect request whenever the link drops. CoreBluetooth then connects
     /// again as soon as the bottle is back in range, including from the background on iOS.
@@ -63,6 +67,8 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     private var sipFrameRepeat = 0
     private var handshakeWorkItems: [DispatchWorkItem] = []
     private var deviceInformation: [String: String] = [:]
+    private var keepAliveTimer: DispatchSourceTimer?
+    private var connectAttemptStarted: Date?
     private var state: ConnectionState = .disconnected(reason: nil) {
         didSet { emit(.connection(state)) }
     }
@@ -160,6 +166,15 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
             self.targetIdentifier = identifier
             self.wantsConnection = true
             UserDefaults.standard.set(identifier.uuidString, forKey: Self.lastBottleKey)
+            if let pending = self.peripheral, pending.identifier == identifier, pending.state == .connecting {
+                // A connect request is already queued with CoreBluetooth. Cancel it and
+                // issue a fresh one so a manual retry has a visible effect.
+                let waited = self.connectAttemptStarted.map { Int(Date().timeIntervalSince($0)) } ?? 0
+                self.log(.info, "Cancelling pending connect (waited \(waited)s) and retrying")
+                self.central.cancelPeripheralConnection(pending)
+                self.queue.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.attemptConnection() }
+                return
+            }
             self.attemptConnection()
         }
     }
@@ -200,8 +215,64 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         peripheral = found
         found.delegate = self
         state = .connecting
-        log(.info, "Connecting to \(found.name ?? id.uuidString)…")
-        central.connect(found, options: [CBConnectPeripheralOptionNotifyOnDisconnectionKey: true])
+        connectAttemptStarted = Date()
+        log(.info, "Connecting to \(found.name ?? id.uuidString) (peripheral state \(found.state.rawValue))…")
+        central.connect(found, options: connectOptions)
+    }
+
+    private var connectOptions: [String: Any] {
+        var options: [String: Any] = [CBConnectPeripheralOptionNotifyOnDisconnectionKey: true]
+        #if os(iOS)
+        if #available(iOS 17.0, *) {
+            // Let CoreBluetooth re-establish the link itself after a supervision timeout.
+            options[CBConnectPeripheralOptionEnableAutoReconnect] = true
+        }
+        #endif
+        return options
+    }
+
+    private func startKeepAlive() {
+        stopKeepAlive()
+        guard let interval = _options.keepAliveInterval, interval > 0 else { return }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + interval, repeating: interval)
+        timer.setEventHandler { [weak self] in
+            guard let self, let peripheral = self.peripheral, peripheral.state == .connected,
+                  let battery = self.characteristic(HidrateUUID.batteryLevel) else { return }
+            peripheral.readValue(for: battery)
+        }
+        timer.resume()
+        keepAliveTimer = timer
+    }
+
+    private func stopKeepAlive() {
+        keepAliveTimer?.cancel()
+        keepAliveTimer = nil
+    }
+
+    private static func describe(_ error: Error?) -> String {
+        guard let error else { return "no error reported" }
+        let ns = error as NSError
+        return "\(error.localizedDescription) [\(ns.domain) \(ns.code)]"
+    }
+
+    private func handleDisconnect(_ peripheral: CBPeripheral, error: Error?, isReconnecting: Bool) {
+        let reason = Self.describe(error)
+        log(error == nil ? .info : .warning, "Disconnected: \(reason)\(isReconnecting ? " (system auto-reconnect pending)" : "")")
+        resetSessionState()
+        state = .disconnected(reason: error?.localizedDescription)
+        guard wantsConnection, _options.autoReconnect else {
+            self.peripheral = nil
+            return
+        }
+        connectAttemptStarted = Date()
+        state = .connecting
+        if isReconnecting {
+            log(.info, "CoreBluetooth is reconnecting automatically; waiting…")
+        } else {
+            log(.info, "Re-issuing connect; it completes when the bottle advertises again")
+            central.connect(peripheral, options: connectOptions)
+        }
     }
 
     // MARK: - Commands
@@ -281,6 +352,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
 
     private func resetSessionState() {
         cancelHandshake()
+        stopKeepAlive()
         characteristics = [:]
         services = []
         pendingCharacteristicDiscoveries = 0
@@ -402,6 +474,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
 
         state = .ready(protocolPath)
         log(.info, "Ready. Sip path: \(protocolPath?.rawValue ?? "none")")
+        startKeepAlive()
     }
 
     private func handleSipFrame(_ data: Data) {
@@ -515,14 +588,15 @@ extension HidrateBottleClient: CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        log(.info, "Connected to \(peripheral.name ?? peripheral.identifier.uuidString)")
+        let waited = connectAttemptStarted.map { String(format: " after %.1fs", Date().timeIntervalSince($0)) } ?? ""
+        log(.info, "Connected to \(peripheral.name ?? peripheral.identifier.uuidString)\(waited)")
         resetSessionState()
         state = .discoveringServices
         peripheral.discoverServices(nil)
     }
 
     public func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        log(.error, "Connect failed: \(error?.localizedDescription ?? "unknown error")")
+        log(.error, "Connect failed: \(Self.describe(error))")
         state = .disconnected(reason: error?.localizedDescription ?? "connect failed")
         if wantsConnection, _options.autoReconnect {
             queue.asyncAfter(deadline: .now() + 2) { [weak self] in self?.attemptConnection() }
@@ -530,18 +604,21 @@ extension HidrateBottleClient: CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        let reason = error?.localizedDescription
-        log(reason == nil ? .info : .warning, "Disconnected\(reason.map { ": \($0)" } ?? "")")
-        resetSessionState()
-        state = .disconnected(reason: reason)
-        if wantsConnection, _options.autoReconnect {
-            log(.info, "Waiting for the bottle to come back into range…")
-            state = .connecting
-            central.connect(peripheral, options: [CBConnectPeripheralOptionNotifyOnDisconnectionKey: true])
-        } else {
-            self.peripheral = nil
-        }
+        handleDisconnect(peripheral, error: error, isReconnecting: false)
     }
+
+    #if os(iOS)
+    @available(iOS 17.0, *)
+    public func centralManager(
+        _ central: CBCentralManager,
+        didDisconnectPeripheral peripheral: CBPeripheral,
+        timestamp: CFAbsoluteTime,
+        isReconnecting: Bool,
+        error: Error?
+    ) {
+        handleDisconnect(peripheral, error: error, isReconnecting: isReconnecting)
+    }
+    #endif
 }
 
 // MARK: - CBPeripheralDelegate

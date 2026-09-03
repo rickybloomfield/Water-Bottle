@@ -47,12 +47,22 @@ enum IntakeSource: String, CaseIterable, Identifiable {
 final class AppState {
     let model: HidrateBottleModel
     let health = HealthKitWaterLogger()
+    let sessionLog = SessionLog()
 
     private(set) var entries: [IntakeEntry] = [] { didSet { saveEntries() } }
     var autoLogToHealth: Bool { didSet { defaults.set(autoLogToHealth, forKey: Keys.autoLog) } }
     var intakeSource: IntakeSource { didSet { defaults.set(intakeSource.rawValue, forKey: Keys.source) } }
     var minimumLogML: Double { didSet { defaults.set(minimumLogML, forKey: Keys.minimumLog) } }
     var capacityML: Double { didSet { defaults.set(capacityML, forKey: Keys.capacity) } }
+    var exploreAllCharacteristics: Bool {
+        didSet {
+            defaults.set(exploreAllCharacteristics, forKey: Keys.exploreAll)
+            var options = model.client.options
+            options.subscribeToAllNotifying = exploreAllCharacteristics
+            model.client.options = options
+        }
+    }
+
     var handshakeMode: BottleClientOptions.HandshakeMode {
         didSet {
             defaults.set(handshakeMode.rawValue, forKey: Keys.handshake)
@@ -75,6 +85,7 @@ final class AppState {
         static let minimumLog = "app.minimumLogML"
         static let capacity = "app.capacityML"
         static let handshake = "app.handshakeMode"
+        static let exploreAll = "app.exploreAllCharacteristics"
         static let tracker = "app.trackerConfiguration"
     }
 
@@ -85,6 +96,9 @@ final class AppState {
             .flatMap(BottleClientOptions.HandshakeMode.init(rawValue:)) ?? .capturedReplay
         options.handshake = storedHandshake
         handshakeMode = storedHandshake
+        let exploreAll = UserDefaults.standard.bool(forKey: Keys.exploreAll)
+        options.subscribeToAllNotifying = exploreAll
+        exploreAllCharacteristics = exploreAll
         model = HidrateBottleModel(client: HidrateBottleClient(options: options))
 
         autoLogToHealth = defaults.object(forKey: Keys.autoLog) as? Bool ?? true
@@ -104,6 +118,7 @@ final class AppState {
 
         model.onLevelChange = { [weak self] event in self?.handle(event) }
         model.onSip = { [weak self] record in self?.handle(record) }
+        model.onEvent = { [weak self] event in self?.sessionLog.record(event) }
 
         healthAuthorized = HealthKitWaterLogger.isAvailable && health.canWrite
         model.reconnectLastBottle()
