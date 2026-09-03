@@ -61,6 +61,10 @@ public final class HidrateBottleModel {
             store?.saveCalibration(calibration)
             tracker.reset()
             store?.saveBaselineML(nil)
+            // A new calibration invalidates any level saved under the old one, so a
+            // reconnect can't reconstruct a phantom drink across the change.
+            store?.clearLastLevel()
+            pendingRecoveryCheck = false
         }
     }
 
@@ -322,9 +326,16 @@ public final class HidrateBottleModel {
     }
 
     private func recoverAcrossGap(currentLevelML: Double, at date: Date) {
-        guard let previous = store?.loadLastLevel() else { return }
+        guard let previous = store?.loadLastLevel(), let capacity = calibration?.capacityML else { return }
         let gap = date.timeIntervalSince(previous.date)
         guard gap > 30, gap <= driftModel.maxGapSeconds else { return }
+        // Both anchors must be plausible fill levels. Readings below empty or above
+        // capacity mean the calibration was stale or the bottle was mid-handling; a
+        // "drink" reconstructed from those is noise, not water. (This is what wrote a
+        // phantom 137 mL from two negative levels after a recalibration.)
+        let slack = 0.15 * capacity
+        guard (-slack...(capacity + slack)).contains(previous.levelML),
+              (-slack...(capacity + slack)).contains(currentLevelML) else { return }
         let observedDrop = previous.levelML - currentLevelML
         let config = tracker.configuration
         if observedDrop > 0 {

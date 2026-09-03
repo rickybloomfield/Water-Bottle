@@ -116,16 +116,10 @@ final class AppState {
         model = HidrateBottleModel(client: HidrateBottleClient(options: options))
 
         autoLogToHealth = defaults.object(forKey: Keys.autoLog) as? Bool ?? true
-        intakeSource = defaults.string(forKey: Keys.source).flatMap(IntakeSource.init(rawValue:)) ?? .bottleSips
+        intakeSource = defaults.string(forKey: Keys.source).flatMap(IntakeSource.init(rawValue:)) ?? .weight
         minimumLogML = defaults.object(forKey: Keys.minimumLog) as? Double ?? 15
         capacityML = defaults.object(forKey: Keys.capacity) as? Double ?? BottleCalibration.capacityML(ounces: 21)
 
-        // One-time migration: the HCI sniff proved the PRO 2 reports intake via sip records,
-        // which are drift-immune, so switch anyone still on weight-tracking over to sips.
-        if !defaults.bool(forKey: "app.migratedToSipSource") {
-            defaults.set(true, forKey: "app.migratedToSipSource")
-            if intakeSource == .weight { intakeSource = .bottleSips }
-        }
         let support = (try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
             ?? FileManager.default.temporaryDirectory
         entriesURL = support.appendingPathComponent("intake-entries.json")
