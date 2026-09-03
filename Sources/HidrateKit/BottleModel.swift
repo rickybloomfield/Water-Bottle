@@ -97,8 +97,10 @@ public final class HidrateBottleModel {
         if let baseline = store?.loadBaselineML() {
             tracker.reset(baselineML: baseline)
         }
-        eventTask = Task { [weak self, client] in
-            for await event in client.events() {
+        // Subscribe synchronously so nothing emitted before the task first runs is lost.
+        let events = client.events()
+        eventTask = Task { [weak self] in
+            for await event in events {
                 guard let self else { break }
                 self.handle(event)
             }

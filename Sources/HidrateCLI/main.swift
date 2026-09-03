@@ -76,8 +76,9 @@ switch command {
 case "scan":
     let seconds = positional.first.flatMap(Double.init) ?? 15
     let client = HidrateBottleClient(options: makeOptions())
+    let events = client.events()
     let task = Task {
-        for await event in client.events() {
+        for await event in events {
             if case .discovered = event { printEvent(event, quiet: true) }
             if case .bluetoothState(let s) = event, s == .unauthorized || s == .unsupported || s == .poweredOff {
                 print("Bluetooth is not usable (state \(s.rawValue)). Grant Bluetooth access to your terminal in System Settings → Privacy & Security → Bluetooth.")
@@ -97,8 +98,9 @@ case "monitor":
     let client = HidrateBottleClient(options: makeOptions())
     let quiet = flags.contains("--quiet")
     var connecting = false
+    let events = client.events()
     let task = Task {
-        for await event in client.events() {
+        for await event in events {
             printEvent(event, quiet: quiet)
             if case .discovered(let bottle) = event, !connecting {
                 let matches = wanted.map { bottle.name.lowercased().contains($0) || bottle.id.uuidString.lowercased() == $0 } ?? true
