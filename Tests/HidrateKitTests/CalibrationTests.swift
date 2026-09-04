@@ -283,3 +283,64 @@ struct NearEmptyTests {
         }
     }
 }
+
+/// The believed level: carried across events, never read off the scale.
+@Suite("Believed level")
+struct BelievedLevelTests {
+    let capacity = 621.0
+
+    /// Reproduces a day: fill to the top, three drinks, and an hour of creep between
+    /// them. The believed level follows the water; the scale does not.
+    @Test func followsDrinksAndIgnoresDrift() {
+        var tracker = LevelTracker(capacityML: capacity)
+        var believed = 0.0
+        var scale = 0.0
+
+        func settle(_ level: Double) {
+            scale = level
+            switch tracker.ingest(levelML: level) {
+            case .drink(let volume, _, _)?: believed = max(believed - volume, 0)
+            case .refill(let volume, _, _)?:
+                let filled = believed + volume
+                believed = filled >= capacity * 0.92 ? capacity : min(filled, capacity)
+            default: break
+            }
+        }
+
+        settle(0)                     // baseline: empty bottle
+        settle(capacity)              // filled to the top
+        #expect(believed == capacity)
+
+        // Twenty minutes of creep at 5 mL/min, in the small steps it actually arrives in.
+        for step in 1...20 { settle(capacity - Double(step) * 5) }
+        #expect(believed == capacity, "drift must not move the believed level")
+        #expect(scale < capacity - 90, "while the scale has wandered a long way")
+
+        settle(scale - 355)           // a 12 oz drink
+        #expect(abs(believed - (capacity - 355)) < 1)
+    }
+
+    /// Miss an event and the believed level is wrong. Adding most of a bottleful puts it
+    /// back, because the water had nowhere else to go.
+    @Test func fillingFromEmptyResynchronises() {
+        var tracker = LevelTracker(capacityML: capacity)
+        var believed = 200.0                    // out of step: the bottle really holds 20
+        _ = tracker.ingest(levelML: 20)
+        if case .refill(let volume, _, _)? = tracker.ingest(levelML: capacity) {
+            believed = volume >= capacity * 0.92 ? capacity : min(believed + volume, capacity)
+        }
+        #expect(believed == capacity)
+    }
+
+    /// A top-up says how much went in, not how much is there, so it cannot resynchronise
+    /// a believed level that is already wrong — it can only add to it.
+    @Test func aTopUpOnlyAddsWhatWentIn() {
+        var tracker = LevelTracker(capacityML: capacity)
+        var believed = 200.0
+        _ = tracker.ingest(levelML: 400)
+        if case .refill(let volume, _, _)? = tracker.ingest(levelML: capacity) {
+            believed = volume >= capacity * 0.92 ? capacity : min(believed + volume, capacity)
+        }
+        #expect(abs(believed - 421) < 1)
+    }
+}

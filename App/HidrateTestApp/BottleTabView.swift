@@ -77,11 +77,16 @@ struct BottleTabView: View {
     private var levelSection: some View {
         Section("Water level") {
             if let calibration = model.calibration, calibration.isValid {
-                if let level = model.clampedLevelML, let fraction = model.fillFraction {
+                if let level = model.displayLevelML, let fraction = model.displayFillFraction {
                     Gauge(value: fraction) { Text("Fill") } currentValueLabel: { Text(app.volume(level)) }
                         .gaugeStyle(.accessoryLinear)
                     LabeledContent("In the bottle", value: app.volume(level))
                     LabeledContent("Fill", value: "\(Int((fraction * 100).rounded()))%")
+                    if let scale = model.clampedLevelML, abs(scale - level) >= 20 {
+                        // The scale's own answer, for when the two have parted company.
+                        LabeledContent("Scale reads", value: app.volume(scale))
+                            .foregroundStyle(.secondary)
+                    }
                     if let drift = model.zeroDriftML, drift > 0 {
                         Label("Reading \(app.volume(drift)) below empty — the zero has drifted.",
                               systemImage: "exclamationmark.triangle")

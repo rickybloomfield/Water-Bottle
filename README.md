@@ -105,6 +105,21 @@ re-zero will call that empty and the displayed level will be wrong until the nex
 Intake is unaffected — the tracker measures differences, and a drink after a re-zero still
 reads as a drink — and being wrong about the level beats discarding every reading.
 
+## The level the app shows
+
+Not the one on the scale. The scale's zero creeps by hundreds of millilitres an hour, so
+the app carries a level forward instead: it starts from a known point and moves only when
+the tracker reports a drink or a refill. Differences are taken over seconds, where creep
+is nothing, so the displayed level holds still while the bottle does.
+
+It comes back into step at two moments. Emptying the bottle re-zeros it to nothing, and
+adding most of a bottleful in one go sets it to full — the water had nowhere else to go,
+so that is the one refill whose result is known from a difference alone. A smaller top-up
+only adds what went in.
+
+Between those, a missed event leaves it out of step, and the Bottle tab shows what the
+scale says alongside it once the two differ by more than 20 mL.
+
 ## When the level reads below empty
 
 The bottle's scale drifts: over days its zero creeps down, so the raw reading can sit

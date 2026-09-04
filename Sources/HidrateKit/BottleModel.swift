@@ -39,6 +39,19 @@ public final class HidrateBottleModel {
     /// Last settled raw reading saved to disk. Held as a raw value, not millilitres, so
     /// that recalibrating reinterprets it rather than throwing it away.
     public private(set) var rememberedRaw: Int?
+
+    /// How much water the bottle is believed to hold, carried forward across events
+    /// rather than read off the scale.
+    ///
+    /// The scale's zero creeps by hundreds of millilitres over an hour, so an absolute
+    /// reading is a poor thing to display. Differences across a drink are taken over
+    /// seconds, where creep is nothing — so this starts from a known point and moves only
+    /// when the tracker reports a drink or a refill. Drift moves it not at all. It goes
+    /// out of step if an event is missed, and comes back into step at the next fill to
+    /// the top, which snaps it to capacity.
+    public private(set) var believedLevelML: Double?
+    /// A refill adding this much of a bottleful is taken as "filled from empty to full".
+    public var filledToTheTopFraction = 0.92
     public private(set) var stableStreak = 0
     public private(set) var weightSampleCount = 0
     public private(set) var sips: [SipRecord] = []
@@ -87,6 +100,8 @@ public final class HidrateBottleModel {
             // reading survives: it means the same thing under any calibration, and it is
             // what keeps the bottle from being drawn empty until the next connection.
             store?.clearLastLevel()
+            believedLevelML = nil
+            store?.saveBelievedLevelML(nil)
             pendingRecoveryCheck = false
         }
     }
@@ -135,6 +150,8 @@ public final class HidrateBottleModel {
         store?.saveLastLevel(0, date: Date())
         rememberedRaw = raw
         store?.saveLastRaw(raw, date: Date())
+        believedLevelML = 0
+        store?.saveBelievedLevelML(0)
         belowEmptyStreak = 0
         belowEmptySince = nil
         pendingRecoveryCheck = false
@@ -198,6 +215,7 @@ public final class HidrateBottleModel {
         if let baseline = store?.loadBaselineML() {
             tracker.reset(baselineML: baseline)
         }
+        believedLevelML = store?.loadBelievedLevelML()
         if let raw = store?.loadLastRaw()?.raw {
             rememberedRaw = raw
         } else if let level = store?.loadLastLevel()?.levelML, let calibration = storedCalibration, calibration.isValid {
@@ -251,8 +269,10 @@ public final class HidrateBottleModel {
         return calibration.milliliters(forRaw: Double(rememberedRaw))
     }
 
-    /// Level to show: the live reading when we have one, otherwise the last one we saved.
-    public var displayLevelML: Double? { currentLevelML ?? rememberedLevelML }
+    /// Level to show. The believed level first: it is the one that doesn't wander while
+    /// the bottle sits still. The scale is the fallback, before enough has happened to
+    /// know what the bottle holds.
+    public var displayLevelML: Double? { believedLevelML ?? clampedLevelML ?? rememberedLevelML }
 
     public var displayFillFraction: Double? {
         guard let calibration, calibration.isValid, let level = displayLevelML, calibration.capacityML > 0 else { return nil }
@@ -474,10 +494,38 @@ public final class HidrateBottleModel {
         // when the bottle was already near empty, and re-zeroing on that would swallow it.
         if change == nil { considerRezero(levelML: levelML, raw: raw, at: date) }
 
+        applyToBelievedLevel(change, measuredLevelML: levelML)
+
         guard let change, !change.isBaseline else { return }
         let event = LevelChangeEvent(id: UUID(), date: date, change: change, stableRaw: raw)
         levelChanges.insert(event, at: 0)
         onLevelChange?(event)
+    }
+
+    /// Move the believed level by what actually happened, never by what the scale says.
+    private func applyToBelievedLevel(_ change: LevelChange?, measuredLevelML: Double) {
+        guard let capacity = calibration?.capacityML, capacity > 0 else { return }
+        switch change {
+        case .drink(let volumeML, _, _):
+            believedLevelML = max((believedLevelML ?? measuredLevelML) - volumeML, 0)
+        case .refill(let volumeML, _, _):
+            // Adding most of a bottleful can only mean it started near empty and is now
+            // near full — the water had nowhere else to go. That is the one moment the
+            // contents are known from a difference alone, so it is where a believed level
+            // that has fallen out of step comes back. A smaller top-up says only how much
+            // went in, not how much is there.
+            if volumeML >= capacity * filledToTheTopFraction {
+                believedLevelML = capacity
+            } else {
+                believedLevelML = min((believedLevelML ?? measuredLevelML) + volumeML, capacity)
+            }
+        case .baseline where believedLevelML == nil:
+            // Nothing to carry forward yet; start from the scale, wrong as it may be.
+            believedLevelML = min(max(measuredLevelML, 0), capacity)
+        case .baseline, .none:
+            return
+        }
+        store?.saveBelievedLevelML(believedLevelML)
     }
 
     private func considerRezero(levelML: Double, raw: Int, at date: Date) {

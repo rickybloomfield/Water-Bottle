@@ -9,6 +9,7 @@ public final class CalibrationStore: @unchecked Sendable {
     private let lastLevelDateKey: String
     private let lastRawKey: String
     private let lastRawDateKey: String
+    private let believedLevelKey: String
 
     public init(defaults: UserDefaults = .standard, keyPrefix: String = "HidrateKit") {
         self.defaults = defaults
@@ -18,6 +19,7 @@ public final class CalibrationStore: @unchecked Sendable {
         lastLevelDateKey = keyPrefix + ".lastLevelDate"
         lastRawKey = keyPrefix + ".lastRaw"
         lastRawDateKey = keyPrefix + ".lastRawDate"
+        believedLevelKey = keyPrefix + ".believedLevelML"
     }
 
     public func loadCalibration() -> BottleCalibration? {
@@ -72,5 +74,15 @@ public final class CalibrationStore: @unchecked Sendable {
     public func saveLastRaw(_ raw: Int, date: Date) {
         defaults.set(raw, forKey: lastRawKey)
         defaults.set(date, forKey: lastRawDateKey)
+    }
+
+    /// The level carried forward across drinks and refills, rather than read off the
+    /// scale. See `HidrateBottleModel.believedLevelML`.
+    public func loadBelievedLevelML() -> Double? {
+        defaults.object(forKey: believedLevelKey) as? Double
+    }
+
+    public func saveBelievedLevelML(_ value: Double?) {
+        if let value { defaults.set(value, forKey: believedLevelKey) } else { defaults.removeObject(forKey: believedLevelKey) }
     }
 }
