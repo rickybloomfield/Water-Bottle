@@ -8,14 +8,20 @@ struct CircularWaterView: View {
     var snapshot: HydrationSnapshot
 
     var body: some View {
-        Gauge(value: snapshot.progress) {
-            Image(systemName: "drop.fill")
-        } currentValueLabel: {
+        // Drawn rather than left to a Gauge, so the ring carries the app's colour and the
+        // pace marker. `widgetAccentable` puts it in the accent group, which is what a
+        // watch face that tints its complications colours with the face's own colour.
+        HydrationRing(progress: snapshot.progress,
+                      tint: snapshot.tint,
+                      paceMarker: snapshot.paceMarker(),
+                      markerStyle: .dot,
+                      thickness: 0.17) {
             Text(snapshot.number(snapshot.totalML))
-                .minimumScaleFactor(0.5)
+                .font(.system(size: 24, weight: .semibold, design: .rounded))
+                .minimumScaleFactor(0.4)
+                .lineLimit(1)
         }
-        .gaugeStyle(.accessoryCircularCapacity)
-        .tint(snapshot.tint)
+        .widgetAccentable()
         .accessibilityLabel("Water today")
         .accessibilityValue("\(snapshot.volume(snapshot.totalML)) of a \(snapshot.volume(snapshot.goalML)) goal")
     }
@@ -34,11 +40,8 @@ struct RectangularWaterView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Gauge(value: snapshot.progress) {
-                Text(snapshot.number(snapshot.totalML)).minimumScaleFactor(0.5)
-            }
-            .gaugeStyle(.accessoryCircularCapacity)
-            .tint(snapshot.tint)
+            CircularWaterView(snapshot: snapshot)
+                .frame(width: 44, height: 44)
             // No room for a title here — the face already says which complication this is.
             VStack(alignment: .leading, spacing: 1) {
                 Text(snapshot.totalOfGoal).font(.subheadline.weight(.semibold))

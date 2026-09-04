@@ -15,8 +15,9 @@ struct SettingsView: View {
                 healthSection
                 Section {
                     NavigationLink { DebugView() } label: { Label("Debug", systemImage: "wrench.and.screwdriver") }
+                    LabeledContent("Version", value: AppVersion.short)
                 } footer: {
-                    Text("Bluetooth diagnostics, raw sensor data, and tuning. You shouldn't need these day to day.")
+                    Text("Bluetooth diagnostics, raw sensor data, and tuning. You shouldn't need these day to day. The watch app carries its own version, at the bottom of its screen — compare the two to see whether the watch has caught up.")
                 }
             }
             .navigationTitle("Settings")

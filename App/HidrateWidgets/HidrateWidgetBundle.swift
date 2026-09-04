@@ -12,6 +12,9 @@ struct HydrationWidget: Widget {
         .configurationDisplayName("Hydration")
         .description("Today's total against your goal, with one-tap amounts.")
         .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular, .accessoryInline])
+        // The stock margins leave a widget this simple mostly empty; each layout sets
+        // its own, tighter one.
+        .contentMarginsDisabled()
     }
 }
 

@@ -24,8 +24,9 @@ struct RingWidgetView: View {
 
     var body: some View {
         HydrationRing(progress: snapshot.progress, tint: snapshot.tint, paceMarker: snapshot.paceMarker()) {
-            HydrationRingLabel(snapshot: snapshot, numberSize: 34, goalSize: 12)
+            HydrationRingLabel(snapshot: snapshot, numberSize: 36, goalSize: 13)
         }
+        .padding(10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
@@ -35,21 +36,21 @@ struct QuickAddWidgetView: View {
     var snapshot: HydrationSnapshot
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 16) {
             HydrationRing(progress: snapshot.progress, tint: snapshot.tint, paceMarker: snapshot.paceMarker()) {
-                HydrationRingLabel(snapshot: snapshot, numberSize: 25, goalSize: 11)
+                HydrationRingLabel(snapshot: snapshot, numberSize: 26, goalSize: 11)
             }
             // Held a little under the widget's height, which leaves the amounts more room.
-            .frame(maxWidth: 108, maxHeight: 108)
+            .frame(maxWidth: 116, maxHeight: 116)
 
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 2), spacing: 6) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
                 ForEach(snapshot.presetsML, id: \.self) { ml in
                     Button(intent: LogDrinkIntent(milliliters: ml)) {
                         Text(snapshot.volume(ml))
                             .font(.subheadline.weight(.semibold))
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
-                            .frame(maxWidth: .infinity, minHeight: 34)
+                            .frame(maxWidth: .infinity, minHeight: 38)
                             .background(Color.blue.opacity(0.16), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                             .foregroundStyle(Color.blue)
                     }
@@ -58,5 +59,6 @@ struct QuickAddWidgetView: View {
                 }
             }
         }
+        .padding(12)
     }
 }

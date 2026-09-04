@@ -22,6 +22,11 @@ struct WatchTodayView: View {
                         .multilineTextAlignment(.center)
 
                     presetGrid
+
+                    Text("Hydration \(AppVersion.short)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                        .padding(.top, 4)
                 }
                 .padding(.horizontal, 2)
                 .padding(.bottom, 8)
