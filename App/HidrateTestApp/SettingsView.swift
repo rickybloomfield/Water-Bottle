@@ -8,101 +8,139 @@ struct SettingsView: View {
         @Bindable var app = app
         NavigationStack {
             Form {
-                Section("Drink LED flash") {
-                    Toggle("Flash bottle LED on drink", isOn: $app.flashLEDOnDrink)
-                    Picker("Light", selection: Binding(
-                        get: { LEDPattern(rawValue: UInt8(app.drinkLEDByte & 0xFF)) },
-                        set: { if let p = $0 { app.drinkLEDByte = Int(p.rawValue) } }
-                    )) {
-                        ForEach(LEDPattern.allCases) { Text($0.title).tag(Optional($0)) }
-                        if LEDPattern(rawValue: UInt8(app.drinkLEDByte & 0xFF)) == nil {
-                            Text(String(format: "Custom 0x%02X", app.drinkLEDByte)).tag(Optional<LEDPattern>.none)
-                        }
-                    }
-                    Stepper(value: $app.drinkLEDByte, in: 0...255) {
-                        LabeledContent("Colour byte", value: String(format: "0x%02X", app.drinkLEDByte))
-                    }
-                    Toggle("Stop the flash after a delay", isOn: $app.ledStopEnabled)
-                    if app.ledStopEnabled {
-                        Stepper(value: $app.ledStopByte, in: 0...255) {
-                            LabeledContent("Stop byte", value: String(format: "0x%02X", app.ledStopByte))
-                        }
-                        Stepper(value: $app.ledStopDelay, in: 0.5...5, step: 0.5) {
-                            LabeledContent("Stop after", value: String(format: "%.1f s", app.ledStopDelay))
-                        }
-                    }
-                    Button("Test flash now") { app.flashDrinkLED() }
-                        .disabled(!app.model.isConnected)
-                    Text("From the sniff: 0xB0 is blue (it loops), 0x47 is red. The flash sends the colour byte, then the stop byte after the delay so it does not blink forever. Tune the bytes here if 0xB0 / 0x00 aren't right.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-
-                Section("Intake logging") {
-                    Picker("Source", selection: $app.intakeSource) {
-                        ForEach(IntakeSource.allCases) { Text($0.title).tag($0) }
-                    }
-                    Toggle("Write to Health automatically", isOn: $app.autoLogToHealth)
-                    Stepper(value: $app.minimumLogML, in: 0...200, step: 5) {
-                        LabeledContent("Minimum to log", value: Format.ml(app.minimumLogML))
-                    }
-                    if app.healthAuthorized {
-                        Label("Health write access granted", systemImage: "checkmark.circle").foregroundStyle(.green)
-                    } else {
-                        Button("Allow Health access") { Task { await app.requestHealthAccess() } }
-                    }
-                }
-
-                Section("Drink detection (weight)") {
-                    let config = Binding(get: { app.trackerConfiguration }, set: { app.trackerConfiguration = $0 })
-                    Stepper(value: config.minDrinkML, in: 5...100, step: 5) {
-                        LabeledContent("Minimum drink", value: Format.ml(config.wrappedValue.minDrinkML))
-                    }
-                    Stepper(value: config.refillFractionOfCapacity, in: 0.2...0.9, step: 0.05) {
-                        LabeledContent("Refill jump", value: "\(Int(config.wrappedValue.refillFractionOfCapacity * 100))% of bottle")
-                    }
-                    Stepper(value: config.nearFullFraction, in: 0.7...1.0, step: 0.05) {
-                        LabeledContent("Refill if filled to", value: "\(Int(config.wrappedValue.nearFullFraction * 100))% of bottle")
-                    }
-                    Stepper(value: Binding(get: { app.model.stabilitySamples }, set: { app.model.stabilitySamples = $0 }), in: 1...10) {
-                        LabeledContent("Stable samples", value: "\(app.model.stabilitySamples)")
-                    }
-                    Stepper(value: Binding(get: { app.model.stabilityTolerance }, set: { app.model.stabilityTolerance = $0 }), in: 1...20) {
-                        LabeledContent("Stable tolerance", value: "±\(app.model.stabilityTolerance) raw")
-                    }
-                    Text("A drink is any decrease past the minimum. An increase is only counted as a refill if it jumps by the refill fraction of the bottle, or the level reaches the fill line. Small increases from surface changes are ignored.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                    Button("Reset tracking baseline") { app.model.resetLevelBaseline() }
-                }
-
-                Section("Protocol") {
-                    Toggle("Read unknown characteristics on connect", isOn: $app.readUnknownOnConnect)
-                    Toggle("Subscribe to all characteristics", isOn: $app.exploreAllCharacteristics)
-                    Text("Exploration mode: also enables notifications on undecoded characteristics. Leave off if the bottle disconnects shortly after connecting. Applies on the next connection.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                    Picker("Init", selection: $app.handshakeMode) {
-                        Text("Auto (recommended)").tag(BottleClientOptions.HandshakeMode.auto)
-                        Text("PRO 2 full init").tag(BottleClientOptions.HandshakeMode.pro2)
-                        Text("Older replay").tag(BottleClientOptions.HandshakeMode.capturedReplay)
-                        Text("Computed (older)").tag(BottleClientOptions.HandshakeMode.computed)
-                        Text("None").tag(BottleClientOptions.HandshakeMode.none)
-                    }
-                    Text("Auto detects a PRO 2 (Telink command channel) and replays the official app's full init, which is what makes the bottle stream live weight and emit sip records. Applies on the next connection.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-
-                Section("Bottle") {
-                    Button("Forget saved bottle", role: .destructive) {
-                        app.model.disconnect()
-                        app.model.client.forgetLastBottle()
-                    }
-                }
-
-                Section("About") {
-                    Text("HidrateKit test app. The official Hidrate app must be closed (or its Bluetooth permission revoked) while this app is connected; the bottle accepts one connection at a time.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                goalSection
+                unitsSection
+                remindersSection
+                lightSection
+                healthSection
+                Section {
+                    NavigationLink { DebugView() } label: { Label("Debug", systemImage: "wrench.and.screwdriver") }
+                } footer: {
+                    Text("Bluetooth diagnostics, raw sensor data, and tuning. You shouldn't need these day to day.")
                 }
             }
             .navigationTitle("Settings")
+            .task { await app.refreshNotificationStatus() }
+        }
+    }
+
+    // MARK: - Goal
+
+    private var goalSection: some View {
+        @Bindable var app = app
+        return Section {
+            Stepper(value: $app.dailyGoalML, in: (app.unit.goalStepML * 2)...(6000), step: app.unit.goalStepML) {
+                HStack {
+                    Text("Daily goal")
+                    Spacer()
+                    Text(app.volume(app.dailyGoalML)).font(.body.weight(.semibold)).monospacedDigit()
+                }
+            }
+            HStack {
+                ForEach(goalPresets, id: \.self) { ml in
+                    Button(app.volume(ml)) { app.dailyGoalML = ml }
+                        .buttonStyle(.bordered)
+                        .tint(abs(app.dailyGoalML - ml) < 1 ? .blue : .secondary)
+                }
+            }
+        } header: {
+            Text("Goal")
+        } footer: {
+            Text("A common target is about 64 oz (1.9 L) a day. Adjust to what works for you.")
+        }
+    }
+
+    private var goalPresets: [Double] {
+        app.unit == .ounces
+            ? [48, 64, 80, 100].map { $0 * VolumeUnit.mlPerOunce }
+            : [1500, 2000, 2500, 3000]
+    }
+
+    // MARK: - Units
+
+    private var unitsSection: some View {
+        @Bindable var app = app
+        return Section("Units") {
+            Picker("Show water in", selection: $app.unit) {
+                ForEach(VolumeUnit.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+
+    // MARK: - Reminders
+
+    private var remindersSection: some View {
+        @Bindable var app = app
+        return Section {
+            Toggle("Remind me to drink", isOn: Binding(
+                get: { app.reminders.enabled },
+                set: { on in Task { await app.setRemindersEnabled(on) } }
+            ))
+            if app.reminders.enabled {
+                DatePicker("From", selection: Binding(
+                    get: { app.reminders.startDate },
+                    set: { app.reminders.startMinutes = ReminderSettings.minutes(of: $0) }
+                ), displayedComponents: .hourAndMinute)
+                DatePicker("Until", selection: Binding(
+                    get: { app.reminders.endDate },
+                    set: { app.reminders.endMinutes = ReminderSettings.minutes(of: $0) }
+                ), displayedComponents: .hourAndMinute)
+                Picker("Every", selection: $app.reminders.intervalMinutes) {
+                    Text("30 min").tag(30); Text("45 min").tag(45); Text("1 hour").tag(60)
+                    Text("1½ hours").tag(90); Text("2 hours").tag(120); Text("3 hours").tag(180)
+                }
+            }
+        } header: {
+            Text("Reminders")
+        } footer: {
+            if app.reminders.enabled {
+                let n = app.reminders.fireTimes.count
+                Text(n > 0 ? "\(n) reminders a day, as notifications." : "Choose a window with at least one reminder in it.")
+            } else if !app.notificationsAuthorized {
+                Text("Turning this on asks for notification permission.")
+            }
+        }
+    }
+
+    // MARK: - Drink light
+
+    private var lightSection: some View {
+        @Bindable var app = app
+        return Section {
+            Toggle("Glow when a drink is logged", isOn: $app.flashLEDOnDrink)
+            if app.flashLEDOnDrink {
+                Picker("Light", selection: Binding(
+                    get: { LEDPattern(rawValue: UInt8(app.drinkLEDByte & 0xFF)) ?? .drinkSuccess },
+                    set: { app.drinkLEDByte = Int($0.rawValue) }
+                )) {
+                    ForEach(LEDPattern.allCases) { Text($0.title).tag($0) }
+                }
+                Button("Preview on the bottle") { app.flashDrinkLED() }
+                    .disabled(!app.model.isConnected)
+            }
+        } header: {
+            Text("Bottle light")
+        } footer: {
+            Text("The bottle glows to confirm each drink the app logs. It also flashes its goal light when you hit your daily goal.")
+        }
+    }
+
+    // MARK: - Health
+
+    private var healthSection: some View {
+        Section {
+            if app.healthAuthorized {
+                Label("Saving water to Apple Health", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            } else {
+                Button { Task { await app.requestHealthAccess() } } label: {
+                    Label("Allow Health access", systemImage: "heart.text.square")
+                }
+            }
+        } header: {
+            Text("Apple Health")
+        } footer: {
+            Text("Each drink is saved as water intake so it counts everywhere else you track hydration.")
         }
     }
 }

@@ -11,8 +11,7 @@ struct ExploreView: View {
     private var model: HidrateBottleModel { app.model }
 
     var body: some View {
-        NavigationStack {
-            List {
+        List {
                 gattSection
                 ledSweepSection
                 rawSection
@@ -39,7 +38,6 @@ struct ExploreView: View {
                     }
                 }
             }
-        }
     }
 
     private var gattSection: some View {

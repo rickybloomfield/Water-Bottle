@@ -1,6 +1,7 @@
 import Foundation
 import HidrateKit
 import Observation
+import UserNotifications
 
 /// One logged drink, with its HealthKit link when written.
 struct IntakeEntry: Identifiable, Codable, Hashable {
@@ -73,6 +74,22 @@ final class AppState {
         }
     }
 
+    var unit: VolumeUnit { didSet { defaults.set(unit.rawValue, forKey: Keys.unit); Task { await rescheduleReminders() } } }
+    var dailyGoalML: Double { didSet { defaults.set(dailyGoalML, forKey: Keys.goal); Task { await rescheduleReminders() } } }
+    var reminders: ReminderSettings {
+        didSet {
+            if let data = try? JSONEncoder().encode(reminders) { defaults.set(data, forKey: Keys.reminders) }
+            Task { await rescheduleReminders() }
+        }
+    }
+    private(set) var notificationsAuthorized = false
+    /// Shown by the Today tab when the goal is first reached each day.
+    var showCelebration = false
+    private var lastCelebratedDay: String? {
+        get { defaults.string(forKey: Keys.celebratedDay) }
+        set { defaults.set(newValue, forKey: Keys.celebratedDay) }
+    }
+
     var flashLEDOnDrink: Bool { didSet { defaults.set(flashLEDOnDrink, forKey: Keys.flashLED) } }
     var drinkLEDByte: Int { didSet { defaults.set(drinkLEDByte, forKey: Keys.ledByte) } }
     var ledStopEnabled: Bool { didSet { defaults.set(ledStopEnabled, forKey: Keys.ledStop) } }
@@ -104,6 +121,10 @@ final class AppState {
         static let exploreAll = "app.exploreAllCharacteristics"
         static let readUnknown = "app.readUnknownOnConnect"
         static let flashLED = "app.flashLEDOnDrink"
+        static let unit = "app.unit"
+        static let goal = "app.dailyGoalML"
+        static let reminders = "app.reminders"
+        static let celebratedDay = "app.lastCelebratedDay"
         static let ledByte = "app.drinkLEDByte"
         static let ledStop = "app.ledStopEnabled"
         static let ledStopByte = "app.ledStopByte"
@@ -124,6 +145,9 @@ final class AppState {
         let readUnknown = UserDefaults.standard.object(forKey: Keys.readUnknown) as? Bool ?? true
         options.readUnknownCharacteristicsOnConnect = readUnknown
         readUnknownOnConnect = readUnknown
+        unit = defaults.string(forKey: Keys.unit).flatMap(VolumeUnit.init(rawValue:)) ?? .ounces
+        dailyGoalML = defaults.object(forKey: Keys.goal) as? Double ?? (64 * VolumeUnit.mlPerOunce)
+        reminders = (defaults.data(forKey: Keys.reminders)).flatMap { try? JSONDecoder().decode(ReminderSettings.self, from: $0) } ?? ReminderSettings()
         flashLEDOnDrink = defaults.object(forKey: Keys.flashLED) as? Bool ?? true
         drinkLEDByte = defaults.object(forKey: Keys.ledByte) as? Int ?? Int(LEDPattern.drinkSuccess.rawValue)
         ledStopEnabled = defaults.object(forKey: Keys.ledStop) as? Bool ?? true
@@ -217,7 +241,55 @@ final class AppState {
         if autoLogToHealth, entry.volumeML >= minimumLogML {
             Task { await logToHealth(entry) }
         }
+        checkGoalReached()
     }
+
+    // MARK: - Goal
+
+    var goalProgress: Double { dailyGoalML > 0 ? min(todayTotalML / dailyGoalML, 1) : 0 }
+    var remainingML: Double { max(dailyGoalML - todayTotalML, 0) }
+    var goalReachedToday: Bool { todayTotalML >= dailyGoalML && dailyGoalML > 0 }
+
+    private static let dayKeyFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; return f
+    }()
+
+    /// Celebrate the first time the goal is crossed each day: in-app confetti, a success
+    /// haptic, and the bottle's own goal light.
+    private func checkGoalReached() {
+        guard goalReachedToday else { return }
+        let today = Self.dayKeyFormatter.string(from: Date())
+        guard lastCelebratedDay != today else { return }
+        lastCelebratedDay = today
+        showCelebration = true
+        sessionLog.write("goal reached: \(Int(todayTotalML))mL of \(Int(dailyGoalML))mL")
+        if model.isConnected { model.client.setLED(.goalAchieved) }
+    }
+
+    // MARK: - Reminders
+
+    func setRemindersEnabled(_ enabled: Bool) async {
+        if enabled {
+            notificationsAuthorized = await ReminderScheduler.requestAuthorization()
+            reminders.enabled = notificationsAuthorized
+        } else {
+            reminders.enabled = false
+        }
+    }
+
+    func rescheduleReminders() async {
+        await ReminderScheduler.apply(reminders, unit: unit, goalML: dailyGoalML)
+    }
+
+    func refreshNotificationStatus() async {
+        let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+        notificationsAuthorized = status == .authorized || status == .provisional
+    }
+
+    // MARK: - Formatting
+
+    func volume(_ ml: Double) -> String { unit.format(ml) }
+    func volumeNumber(_ ml: Double) -> String { unit.number(ml) }
 
     func logToHealth(_ entry: IntakeEntry) async {
         sessionLog.write("healthkit write \(Int(entry.volumeML))mL for \(entry.id)")

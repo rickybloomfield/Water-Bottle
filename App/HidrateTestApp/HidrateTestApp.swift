@@ -9,21 +9,23 @@ struct HidrateTestApp: App {
     var body: some Scene {
         WindowGroup {
             TabView {
-                DashboardView()
+                TodayView()
+                    .tabItem { Label("Today", systemImage: "drop.fill") }
+                HistoryView()
+                    .tabItem { Label("Progress", systemImage: "chart.bar.fill") }
+                BottleTabView()
                     .tabItem { Label("Bottle", systemImage: "waterbottle") }
-                IntakeView()
-                    .tabItem { Label("Intake", systemImage: "drop") }
-                CalibrationView()
-                    .tabItem { Label("Calibrate", systemImage: "scalemass") }
-                ExploreView()
-                    .tabItem { Label("Explore", systemImage: "antenna.radiowaves.left.and.right") }
                 SettingsView()
                     .tabItem { Label("Settings", systemImage: "gear") }
             }
+            .tint(.blue)
             .environment(app)
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { app.model.client.nudgeReconnect() }
+            if phase == .active {
+                app.model.client.nudgeReconnect()
+                Task { await app.refreshHealthTotal() }
+            }
         }
     }
 }

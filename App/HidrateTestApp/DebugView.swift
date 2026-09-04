@@ -1,0 +1,93 @@
+import HidrateKit
+import SwiftUI
+
+/// The engineering controls that used to be the whole app, tucked away.
+struct DebugView: View {
+    @Environment(AppState.self) private var app
+
+    var body: some View {
+        @Bindable var app = app
+        Form {
+            Section("Intake source") {
+                Picker("Source", selection: $app.intakeSource) {
+                    ForEach(IntakeSource.allCases) { Text($0.title).tag($0) }
+                }
+                Toggle("Write to Health automatically", isOn: $app.autoLogToHealth)
+                Stepper(value: $app.minimumLogML, in: 0...200, step: 5) {
+                    LabeledContent("Minimum to log", value: app.volume(app.minimumLogML))
+                }
+            }
+
+            Section {
+                let config = Binding(get: { app.trackerConfiguration }, set: { app.trackerConfiguration = $0 })
+                Stepper(value: config.minDrinkML, in: 5...100, step: 5) {
+                    LabeledContent("Minimum drink", value: app.volume(config.wrappedValue.minDrinkML))
+                }
+                Stepper(value: config.refillFractionOfCapacity, in: 0.2...0.9, step: 0.05) {
+                    LabeledContent("Refill jump", value: "\(Int(config.wrappedValue.refillFractionOfCapacity * 100))% of bottle")
+                }
+                Stepper(value: config.nearFullFraction, in: 0.7...1.0, step: 0.05) {
+                    LabeledContent("Refill if filled to", value: "\(Int(config.wrappedValue.nearFullFraction * 100))%")
+                }
+                Stepper(value: Binding(get: { app.model.stabilitySamples }, set: { app.model.stabilitySamples = $0 }), in: 1...10) {
+                    LabeledContent("Stable samples", value: "\(app.model.stabilitySamples)")
+                }
+                Stepper(value: Binding(get: { app.model.stabilityTolerance }, set: { app.model.stabilityTolerance = $0 }), in: 1...20) {
+                    LabeledContent("Stable tolerance", value: "±\(app.model.stabilityTolerance) raw")
+                }
+                Button("Reset tracking baseline") { app.model.resetLevelBaseline() }
+            } header: {
+                Text("Drink detection")
+            } footer: {
+                Text("A drink is any decrease past the minimum. An increase only counts as a refill if it jumps by the refill fraction or reaches the fill line.")
+            }
+
+            Section("Protocol") {
+                Picker("Init", selection: $app.handshakeMode) {
+                    Text("Auto").tag(BottleClientOptions.HandshakeMode.auto)
+                    Text("PRO 2 full init").tag(BottleClientOptions.HandshakeMode.pro2)
+                    Text("Older replay").tag(BottleClientOptions.HandshakeMode.capturedReplay)
+                    Text("Computed (older)").tag(BottleClientOptions.HandshakeMode.computed)
+                    Text("None").tag(BottleClientOptions.HandshakeMode.none)
+                }
+                Toggle("Read unknown characteristics on connect", isOn: $app.readUnknownOnConnect)
+                Toggle("Subscribe to all characteristics", isOn: $app.exploreAllCharacteristics)
+                Picker("Bottle capacity", selection: $app.capacityML) {
+                    Text("21 oz (621 mL)").tag(BottleCalibration.capacityML(ounces: 21))
+                    Text("24 oz (710 mL)").tag(BottleCalibration.capacityML(ounces: 24))
+                    Text("32 oz (946 mL)").tag(BottleCalibration.capacityML(ounces: 32))
+                }
+            }
+
+            Section("Drink light details") {
+                Toggle("Stop the glow after a delay", isOn: $app.ledStopEnabled)
+                if app.ledStopEnabled {
+                    Stepper(value: $app.ledStopByte, in: 0...255) {
+                        LabeledContent("Stop byte", value: String(format: "0x%02X", app.ledStopByte))
+                    }
+                    Stepper(value: $app.ledStopDelay, in: 0.5...5, step: 0.5) {
+                        LabeledContent("Stop after", value: String(format: "%.1f s", app.ledStopDelay))
+                    }
+                }
+                Stepper(value: $app.drinkLEDByte, in: 0...255) {
+                    LabeledContent("Raw colour byte", value: String(format: "0x%02X", app.drinkLEDByte))
+                }
+            }
+
+            Section("Diagnostics") {
+                NavigationLink { ExploreView() } label: { Label("GATT explorer & log", systemImage: "antenna.radiowaves.left.and.right") }
+                ShareLink(item: app.sessionLog.url) { Label("Share session log (\(app.sessionLog.sizeDescription))", systemImage: "square.and.arrow.up") }
+                Button("Clear session log", role: .destructive) { app.sessionLog.clear() }
+            }
+
+            Section {
+                Button("Forget saved bottle", role: .destructive) {
+                    app.model.disconnect()
+                    app.model.client.forgetLastBottle()
+                }
+            }
+        }
+        .navigationTitle("Debug")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}

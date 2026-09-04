@@ -6,8 +6,13 @@ Talk to a HidrateSpark PRO water bottle directly over Bluetooth, without the off
   decoding (handshake, sip records, weight, cap state, LED), two-point calibration,
   stable-reading filter, drink detection, and a HealthKit water logger.
 * **`hidrate-cli`** (macOS): scan and monitor a bottle from the terminal.
-* **`App/HidrateTestApp`** (iOS): connect, calibrate empty/full, watch live weight,
-  auto-detect drinks, and write them to Health as water intake.
+* **`App/HidrateTestApp`** (iOS): a daily-use hydration app. **Today** shows progress
+  toward your goal and an animated bottle whose water sloshes with device tilt and
+  ripples when tapped, draining as you drink, with a celebration when you hit the goal.
+  **Progress** charts daily/weekly/monthly intake from Apple Health with streaks and
+  stats. **Bottle** covers connection, hardware details, and calibration. **Settings**
+  holds your goal, units (oz or mL), drink reminders, the bottle's drink light, Health
+  access, and a Debug area with the engineering tools.
 * **`docs/PROTOCOL.md`**: everything known about the BLE protocol.
   **`docs/FIRMWARE.md`**: what changing the firmware would actually take.
 
@@ -20,11 +25,12 @@ cd App && xcodegen generate && open HidrateTestApp.xcodeproj
 Run on a real iPhone (CoreBluetooth does not work in the Simulator). Before connecting,
 force-quit the official Hidrate app: the bottle only accepts one connection.
 
-1. **Bottle tab → Scan**, tap your `h2o…` bottle.
-2. **Calibrate tab**: capture empty (dry, lid on, on a table), then capture full. Save.
-3. **Intake tab → Allow Health access.**
-4. Drink, set the bottle down. After ~6 s of stable readings the drop is logged and
-   written to Health as water.
+1. **Bottle tab → Find bottle**, tap your `h2o…` bottle.
+2. **Bottle tab → Calibrate**: capture empty (dry, lid on, on a table), then capture full.
+   It saves itself and the bottle glows green.
+3. **Settings → Allow Health access**, set your goal and units.
+4. Drink and set the bottle down. The drop is logged, written to Health, and the bottle
+   glows blue. The Today tab's bottle drains to match.
 
 ## Quick start (Mac CLI)
 

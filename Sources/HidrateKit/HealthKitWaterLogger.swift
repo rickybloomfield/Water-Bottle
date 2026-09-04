@@ -140,5 +140,27 @@ public final class HealthKitWaterLogger: @unchecked Sendable {
         let start = calendar.startOfDay(for: Date())
         return try await totalML(from: start, to: Date())
     }
+
+    /// Water logged per calendar day (by any app) for the last `days` days, keyed by the
+    /// start of each day. Days with nothing logged are omitted.
+    public func dailyTotalsML(days: Int, calendar: Calendar = .current) async throws -> [Date: Double] {
+        let endOfToday = calendar.startOfDay(for: Date()).addingTimeInterval(86_400)
+        guard let start = calendar.date(byAdding: .day, value: -(days - 1), to: calendar.startOfDay(for: Date())) else { return [:] }
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: endOfToday)
+        let descriptor = HKStatisticsCollectionQueryDescriptor(
+            predicate: .quantitySample(type: waterType, predicate: predicate),
+            options: .cumulativeSum,
+            anchorDate: calendar.startOfDay(for: Date()),
+            intervalComponents: DateComponents(day: 1)
+        )
+        let collection = try await descriptor.result(for: store)
+        var result: [Date: Double] = [:]
+        collection.enumerateStatistics(from: start, to: endOfToday) { statistics, _ in
+            if let sum = statistics.sumQuantity()?.doubleValue(for: self.unit), sum > 0 {
+                result[statistics.startDate] = sum
+            }
+        }
+        return result
+    }
 }
 #endif

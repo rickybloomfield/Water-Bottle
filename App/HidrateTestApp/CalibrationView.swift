@@ -14,8 +14,7 @@ struct CalibrationView: View {
 
     var body: some View {
         @Bindable var app = app
-        NavigationStack {
-            List {
+        List {
                 Section("Bottle size") {
                     Picker("Capacity", selection: $app.capacityML) {
                         Text("21 oz (621 mL)").tag(BottleCalibration.capacityML(ounces: 21))
@@ -81,7 +80,6 @@ struct CalibrationView: View {
             } message: {
                 Text(message ?? "")
             }
-        }
     }
 
     @ViewBuilder
