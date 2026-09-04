@@ -5,15 +5,17 @@ import WatchKit
 /// complication — is picked up without waiting for someone to open the app.
 final class WatchAppDelegate: NSObject, WKApplicationDelegate {
     func applicationDidFinishLaunching() {
-        MainActor.assumeIsolated { WatchHydrationModel.shared.start() }
+        // Hopped rather than asserted: `assumeIsolated` traps outright if watchOS ever
+        // calls this off the main actor, and a trap at launch is a crash on launch.
+        Task { @MainActor in WatchHydrationModel.shared.start() }
     }
 
     func handle(_ backgroundTasks: Set<WKRefreshBackgroundTask>) {
+        Task { @MainActor in
+            WatchHydrationModel.shared.refresh()
+            HydrationStore.reloadWidgets()
+        }
         for task in backgroundTasks {
-            MainActor.assumeIsolated {
-                WatchHydrationModel.shared.refresh()
-                HydrationStore.reloadWidgets()
-            }
             // A snapshot task has its own completion and raises if finished with the
             // general one — and watchOS schedules a snapshot right after launching the
             // app from a complication, which is exactly when this was crashing.
