@@ -5,38 +5,46 @@ import SwiftUI
 struct DayTimeline: View {
     var days: [Date]
     @Binding var selected: Date
+    /// Chosen from the strip rather than swiped to; the screen animates it the same way.
+    var onPick: (Date) -> Void
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(days, id: \.self) { day in
-                        chip(day).id(day)
+        GeometryReader { proxy in
+            ScrollViewReader { scroller in
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(days, id: \.self) { day in
+                            chip(day).id(day)
+                        }
                     }
+                    // Half the width either side, so the first and last days can sit in
+                    // the middle too. Without it the selected day is stuck against
+                    // whichever edge it happens to be near — and the one you are on is
+                    // usually today, which is the last.
+                    .padding(.horizontal, proxy.size.width / 2)
+                    .padding(.vertical, 10)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-            }
-            .onAppear { proxy.scrollTo(selected, anchor: .center) }
-            .onChange(of: selected) { _, day in
-                withAnimation(.snappy) { proxy.scrollTo(day, anchor: .center) }
+                .onAppear { scroller.scrollTo(selected, anchor: .center) }
+                .onChange(of: selected) { _, day in
+                    withAnimation(.snappy) { scroller.scrollTo(day, anchor: .center) }
+                }
             }
         }
-        .background(.bar)
+        .frame(height: 52)
     }
 
     private func chip(_ day: Date) -> some View {
         let isSelected = Calendar.current.isDate(day, inSameDayAs: selected)
         return Button {
-            withAnimation(.snappy) { selected = day }
+            onPick(day)
         } label: {
             Text(Self.label(day))
-                .font(.subheadline.weight(isSelected ? .semibold : .regular))
-                .foregroundStyle(isSelected ? Color.white : Color.primary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(isSelected ? Color.accentColor : Color.secondary.opacity(0.14),
-                            in: Capsule())
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(isSelected ? Color.white : Color.secondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(isSelected ? Color.accentColor : Color.clear, in: Capsule())
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
