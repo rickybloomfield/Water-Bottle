@@ -8,6 +8,8 @@ struct DayDetailView: View {
     @Environment(AppState.self) private var app
 
     let day: Date
+    /// What the row that opened this day was showing, so the log can compare the two.
+    var listedTotalML: Double?
 
     @State private var items: [AppState.TodayItem] = []
     @State private var detail: AppState.TodayItem?
@@ -109,6 +111,7 @@ struct DayDetailView: View {
     private func reload() async {
         items = await app.items(on: day)
         loaded = true
+        await app.logDayBreakdown(day, listedTotalML: listedTotalML)
     }
 }
 

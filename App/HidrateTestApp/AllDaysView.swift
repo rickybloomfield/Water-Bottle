@@ -28,7 +28,7 @@ struct AllDaysView: View {
             ForEach(months, id: \.self) { month in
                 Section(month.formatted(.dateTime.month(.wide).year())) {
                     ForEach(days(in: month), id: \.self) { day in
-                        NavigationLink { DayDetailView(day: day) } label: { row(day) }
+                        NavigationLink { DayDetailView(day: day, listedTotalML: total(day)) } label: { row(day) }
                     }
                 }
             }
