@@ -39,13 +39,15 @@ struct HydrationRing<Content: View>: View {
                     // shadow laid just ahead of its leading end — a difference in
                     // brightness, which survives the single-colour rendering a watch face
                     // and the lock screen impose where a change of hue would not.
-                    let shadow = min(lineWidth * 1.4 / (.pi * (side - lineWidth)), 1 - overflow)
+                    // Just enough to peek out from under the cap on top of it: both are
+                    // drawn with round ends half a line wide, so this is what shows.
+                    let shadow = min(lineWidth * 0.3 / (.pi * (side - lineWidth)), 1 - overflow)
                     Circle()
                         .inset(by: lineWidth / 2)
                         .trim(from: overflow, to: overflow + shadow)
                         .stroke(Color.black.opacity(0.55), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                         .rotationEffect(.degrees(-90))
-                        .blur(radius: lineWidth * 0.14)
+                        .blur(radius: lineWidth * 0.1)
                     Circle()
                         .inset(by: lineWidth / 2)
                         .trim(from: 0, to: overflow)

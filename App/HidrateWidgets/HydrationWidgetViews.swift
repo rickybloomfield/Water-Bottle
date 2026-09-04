@@ -54,13 +54,16 @@ struct QuickAddWidgetView: View {
     var snapshot: HydrationSnapshot
 
     var body: some View {
-        HStack(spacing: 22) {
+        // One gap, used three times: left of the ring, between the ring and the amounts,
+        // and right of them. A fixed ring size rather than a maximum is what makes that
+        // hold — given a maximum, the stack hands the ring spare width and the circle
+        // centres inside it, quietly widening the outer two.
+        HStack(spacing: Self.gap) {
             HydrationRing(progress: snapshot.progress, overflow: snapshot.overflow,
                           tint: snapshot.tint, paceMarker: snapshot.paceMarker()) {
                 HydrationRingLabel(snapshot: snapshot, numberSize: 26, goalSize: 11)
             }
-            // Held a little under the widget's height, which leaves the amounts more room.
-            .frame(maxWidth: 124, maxHeight: 124)
+            .frame(width: 124, height: 124)
 
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
                 ForEach(snapshot.presetsML, id: \.self) { ml in
@@ -77,8 +80,16 @@ struct QuickAddWidgetView: View {
                     .accessibilityLabel("Log \(snapshot.volume(ml))")
                 }
             }
+            // A lazy grid does not claim the width it is offered, and the stack then
+            // centres what it got — which is what left the outer two gaps wider.
+            .frame(maxWidth: .infinity)
         }
-        .padding(12)
+        .padding(.horizontal, Self.gap)
+        // Less above and below: three rows of amounts need the height more than the
+        // margin does.
+        .padding(.vertical, 14)
         .environment(\.colorScheme, .dark)
     }
+
+    private static let gap: CGFloat = 26
 }
