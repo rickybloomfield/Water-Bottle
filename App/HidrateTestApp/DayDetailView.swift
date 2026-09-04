@@ -58,7 +58,9 @@ struct DayDetailView: View {
                 Button("Add a drink", systemImage: "plus") { addingDrink = true }
             }
         }
-        .task(id: app.entries.count) { await reload() }
+        // The revision rather than the count, so correcting a drink refreshes the day.
+        .task(id: app.entriesRevision) { await reload() }
+        .onAppear { Task { await reload() } }
         .refreshable { await reload() }
         .sheet(item: $detail) { item in
             DrinkDetailView(item: item) { entry in pendingDelete = entry }

@@ -17,7 +17,8 @@ struct AllDaysView: View {
     /// How far back Health has been asked so far. Grows a season at a time as the list
     /// is scrolled, rather than reading years nobody looks at on the way in.
     @State private var lookbackDays = 120
-    @State private var loading = true
+    @State private var loading = false
+    @State private var loadedOnce = false
 
     private static let pageDays = 180
     private static let minimumDays = 30
@@ -64,7 +65,7 @@ struct AllDaysView: View {
             }
         }
         .overlay {
-            if visibleDays.isEmpty, !loading {
+            if visibleDays.isEmpty, loadedOnce {
                 ContentUnavailableView {
                     Label(filter == .missed ? "No missed days" : "Nothing yet", systemImage: "checkmark.circle")
                 } description: {
@@ -74,15 +75,22 @@ struct AllDaysView: View {
                 }
             }
         }
-        .task(id: app.entries.count) { await load() }
+        // The revision, not the count: correcting a drink changes neither the number of
+        // them nor this view's copy of the day totals.
+        .task(id: app.entriesRevision) { await load() }
+        // And again on the way back from a day, since a push doesn't re-run the task and
+        // Health may have moved underneath us anyway.
+        .onAppear { Task { await load() } }
         .refreshable { await load() }
     }
 
     // MARK: - Loading
 
     private func load() async {
+        guard !loading else { return }
         loading = true
         daily = await app.dailyTotals(days: lookbackDays)
+        loadedOnce = true
         loading = false
     }
 

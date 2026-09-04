@@ -90,7 +90,16 @@ final class AppState {
         return nil
     }()
 
-    private(set) var entries: [IntakeEntry] = [] { didSet { saveEntries(); publishSnapshot() } }
+    private(set) var entries: [IntakeEntry] = [] {
+        didSet {
+            entriesRevision &+= 1
+            saveEntries()
+            publishSnapshot()
+        }
+    }
+    /// Bumped on every change to `entries`. Screens that hold a snapshot of a day watch
+    /// this rather than the count, which doesn't move when a drink is only corrected.
+    private(set) var entriesRevision = 0
     var autoLogToHealth: Bool { didSet { defaults.set(autoLogToHealth, forKey: Keys.autoLog) } }
     var intakeSource: IntakeSource { didSet { defaults.set(intakeSource.rawValue, forKey: Keys.source) } }
     var minimumLogML: Double { didSet { defaults.set(minimumLogML, forKey: Keys.minimumLog) } }

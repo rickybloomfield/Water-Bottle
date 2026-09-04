@@ -50,7 +50,7 @@ struct HistoryView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Progress")
-            .task(id: app.entries.count) { await load() }
+            .task(id: app.entriesRevision) { await load() }
             .refreshable { await load() }
         }
     }
@@ -141,10 +141,7 @@ struct HistoryView: View {
                     .foregroundStyle(.blue)
                     .frame(width: 32, height: 32)
                     .background(Color.blue.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Days").font(.body.weight(.semibold)).foregroundStyle(.primary)
-                    Text("See and edit any day").font(.caption).foregroundStyle(.secondary)
-                }
+                Text("Historical Data").font(.body.weight(.semibold)).foregroundStyle(.primary)
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.caption.weight(.semibold))
