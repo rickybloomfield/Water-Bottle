@@ -29,41 +29,46 @@ struct DayContentView: View {
     private var reached: Bool { app.dailyGoalML > 0 && totalML >= app.dailyGoalML }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Held above the list rather than scrolling inside it. The day's ring stays
-            // put while its drinks scroll under it, and — the reason it had to move — a
-            // horizontal drag up here can page between days without competing with the
-            // sideways swipe a row wants for deleting.
-            VStack(spacing: 10) {
-                heroCard
-                if isToday { statusRow }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 14)
-            .frame(maxWidth: .infinity)
-            // Opaque and above the list, with an edge shadow, so the drinks read as
-            // passing behind it rather than being clipped by nothing in particular.
-            .background(Color(.systemGroupedBackground))
-            // Tracks the scroll rather than being switched on: nothing is behind the
-            // header until the drinks start passing under it.
-            .shadow(color: .black.opacity(0.14 * scrolledUnder), radius: 7, y: 4)
-            .zIndex(1)
-
-            List {
-                drinksSection
-            }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .trackScrolledUnder($scrolledUnder)
+        List {
+            drinksSection
         }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
         .background(Color(.systemGroupedBackground))
+        .trackScrolledUnder($scrolledUnder)
+        // As a safe-area inset rather than a stacked sibling: the list keeps its own
+        // bounds, so its drinks run under the tab bar the way a list is meant to, and
+        // still stop short of it.
+        .safeAreaInset(edge: .top, spacing: 0) { header }
         .task(id: app.entriesRevision) { await reload() }
         .onAppear { Task { await reload() } }
         .refreshable { await app.refreshHealthTotal(); await reload() }
     }
 
     // MARK: - Hero
+
+    /// The day's ring, held above the drinks rather than scrolling as the first of them.
+    private var header: some View {
+        VStack(spacing: 10) {
+            heroCard
+            if isToday { statusRow }
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 14)
+        .frame(maxWidth: .infinity)
+        .background(Color(.systemGroupedBackground))
+        // A line under the bottom edge, not a shadow around the whole header — there is
+        // nothing behind its sides or its top for one to fall on. It fades in with the
+        // scroll, so it arrives as the drinks begin to pass beneath.
+        .overlay(alignment: .bottom) {
+            LinearGradient(colors: [.black.opacity(0.12 * scrolledUnder), .clear],
+                           startPoint: .top, endPoint: .bottom)
+                .frame(height: 7)
+                .offset(y: 7)
+                .allowsHitTesting(false)
+        }
+    }
 
     private var heroCard: some View {
         HStack(alignment: .center, spacing: 16) {
