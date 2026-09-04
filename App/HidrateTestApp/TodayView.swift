@@ -63,9 +63,10 @@ struct TodayView: View {
     // MARK: - Hero
 
     private var heroCard: some View {
-        HStack(alignment: .center, spacing: 20) {
+        HStack(alignment: .center, spacing: 16) {
             progressRing
-            Spacer(minLength: 0)
+                .aspectRatio(1, contentMode: .fit)
+                .frame(maxWidth: .infinity, maxHeight: 214)
             BottleWaterView(fillFraction: bottleFill, tint: .blue)
                 .frame(width: 118, height: 232)
         }
@@ -74,50 +75,44 @@ struct TodayView: View {
         .accessibilityElement(children: .combine)
     }
 
+    /// Live level when connected; otherwise the last level we saved, so the bottle isn't
+    /// empty at launch while we wait for the first reading.
     private var bottleFill: Double? {
         if let demo = app.demoFillOverride { return demo }
-        if model.isConnected, let fill = model.fillFraction { return fill }
-        return nil
+        return model.displayFillFraction
     }
 
     private var progressRing: some View {
         let reached = app.goalReachedToday
         let ringColor: Color = reached ? .green : .blue
-        return VStack(alignment: .leading, spacing: 14) {
-            ZStack {
-                Circle().stroke(ringColor.opacity(0.15), lineWidth: 16)
-                Circle()
-                    .trim(from: 0, to: app.goalProgress)
-                    .stroke(ringColor, style: StrokeStyle(lineWidth: 16, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                    .animation(.spring(duration: 0.8), value: app.goalProgress)
-                // The number sits dead centre; the unit hangs just beneath it.
+        return ZStack {
+            Circle().stroke(ringColor.opacity(0.15), lineWidth: 18)
+            Circle()
+                .trim(from: 0, to: app.goalProgress)
+                .stroke(ringColor, style: StrokeStyle(lineWidth: 18, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.spring(duration: 0.8), value: app.goalProgress)
+            VStack(spacing: 0) {
                 Text(app.volumeNumber(app.todayTotalML))
-                    .font(.system(size: 38, weight: .bold, design: .rounded))
+                    .font(.system(size: 46, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(reached ? Color.green : Color.primary)
                     .contentTransition(.numericText())
                     .animation(.snappy, value: app.todayTotalML)
-                    .overlay(alignment: .bottom) {
-                        Text(app.unit.symbol)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .offset(y: 18)
-                    }
-            }
-            .frame(width: 150, height: 150)
-            .animation(.easeInOut(duration: 0.5), value: reached)
-
-            VStack(alignment: .leading, spacing: 3) {
-                if reached {
-                    Label("Goal reached", systemImage: "checkmark.seal.fill")
-                        .font(.subheadline.weight(.semibold)).foregroundStyle(.green)
-                } else {
-                    Text("\(app.volume(app.remainingML)) to go").font(.subheadline.weight(.semibold))
-                }
-                Text("Goal \(app.volume(app.dailyGoalML))").font(.footnote).foregroundStyle(.secondary)
+                Text(app.unit.symbol)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, -2)
+                Text("Goal \(app.volume(app.dailyGoalML))")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(reached ? Color.green : Color.secondary)
+                    .padding(.top, 8)
             }
         }
+        .animation(.easeInOut(duration: 0.5), value: reached)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Today's water")
+        .accessibilityValue("\(app.volume(app.todayTotalML)) of a \(app.volume(app.dailyGoalML)) goal")
     }
 
     // MARK: - Status

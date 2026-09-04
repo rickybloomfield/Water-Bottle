@@ -61,9 +61,9 @@ struct BottleWaterView: View {
             w.clip(to: geo.silhouette)
             // Metaballs: blur the particle discs, then threshold the alpha into one smooth
             // liquid body. Order matters: the threshold is applied after the blur.
-            w.addFilter(.alphaThreshold(min: 0.45, color: tint))
-            w.addFilter(.blur(radius: Double(sim.spacing) * 0.85))
-            let r = CGFloat(sim.spacing) * 0.78
+            w.addFilter(.alphaThreshold(min: 0.5, color: tint))
+            w.addFilter(.blur(radius: Double(sim.spacing) * 1.05))
+            let r = CGFloat(sim.spacing) * 0.8
             let positions = sim.positions
             w.drawLayer { layer in
                 for i in 0..<sim.count {
@@ -150,6 +150,7 @@ final class FluidModel {
     private var capacitySites = 0
     private var targetFill: Double = 0
     private var gravityDir = SIMD2<Float>(0, 1)
+    private var smoothedGravity = SIMD2<Float>(0, 1)
     private var lastDate: Date?
     private var motionActive = false
     private var settleClock: Double = 0
@@ -186,16 +187,19 @@ final class FluidModel {
         guard let last = lastDate else { return }
         let elapsed = min(max(date.timeIntervalSince(last), 0), 0.05)
 
-        // Gravity: the real vector, scaled to points. When the phone lies flat the
-        // in-plane component fades; keep a floor so the water never floats.
-        var g = SIMD2<Float>(0, 1)
+        // Gravity: the real vector, low-pass filtered so sensor noise doesn't shake the
+        // water. When the phone lies nearly flat the in-plane component is mostly noise,
+        // so the direction is frozen and a floor keeps the water pooled where it was.
+        var raw = SIMD2<Float>(0, 1)
         if !reduceMotion {
             let sg = MotionGravitySource.shared.screenGravity
-            g = SIMD2(Float(sg.dx), Float(sg.dy))
+            raw = SIMD2(Float(sg.dx), Float(sg.dy))
         }
-        let mag = simd_length(g)
-        if mag > 0.15 { gravityDir = g / mag }
-        let strength = max(mag, 0.3)
+        let alpha = Float(min(1, elapsed / 0.12))
+        smoothedGravity += (raw - smoothedGravity) * alpha
+        let mag = simd_length(smoothedGravity)
+        if mag > 0.25 { gravityDir = smoothedGravity / mag }
+        let strength = max(mag, 0.35)
         let gravity = gravityDir * (9.81 * pointsPerMeter * strength)
 
         // Follow the bottle's level: drain from the surface, or pour in from the neck.

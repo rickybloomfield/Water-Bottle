@@ -28,16 +28,22 @@ final class FluidSimulation {
     /// per-step recompression quadratically, which is what keeps a resting fluid still.
     var solverIterations = 2
     /// XSPH velocity smoothing. Water is nearly inviscid; keep this small.
-    var viscosity: Float = 0.015
+    var viscosity: Float = 0.03
     private let restDensity: Float
     private let epsilon: Float
     var scorrK: Float = 0.03
     /// Under-relaxation of the Jacobi position corrections. Each pair's correction is
     /// applied from both sides at once, so a full step overshoots and iterating amplifies
     /// the overshoot into neighbour-to-neighbour jitter; relaxing it removes that.
-    var relaxation: Float = 0.5
+    var relaxation: Float = 0.4
     private let wDeltaQ: Float
     private let maxSpeed: Float
+    /// Bulk energy loss (wall friction + viscous dissipation): sloshing in a small bottle
+    /// dies out over a few seconds. Time constant in seconds.
+    var dampingTimeConstant: Float = 2.0
+    /// Below this speed a particle is considered at rest and stopped, so solver noise
+    /// can't keep the surface shimmering. 0.03 m/s is imperceptible at this scale.
+    private let sleepSpeed: Float
 
     // State (structure of arrays)
     private(set) var count = 0
@@ -72,6 +78,7 @@ final class FluidSimulation {
         poly6K = 4 / (Float.pi * pow(h, 8))
         spikyGradK = -30 / (Float.pi * pow(h, 5))
         maxSpeed = 3 * pointsPerMeter  // 3 m/s: above anything a bottle produces, below tunnelling speed
+        sleepSpeed = 0.03 * pointsPerMeter
 
         positions = Array(repeating: .zero, count: capacity)
         velocities = Array(repeating: .zero, count: capacity)
@@ -324,6 +331,15 @@ final class FluidSimulation {
                 deltas[i] = acc / restDensity
             }
             for i in 0..<n { velocities[i] += deltas[i] * viscosity * restDensity * (1 / (poly6K * pow(h2, 3))) }
+        }
+        // Dissipation and rest: lose a little energy every step, and stop particles that
+        // are only jittering.
+        let damp = max(0, 1 - dt / dampingTimeConstant)
+        let sleep2 = sleepSpeed * sleepSpeed
+        for i in 0..<n {
+            var v = velocities[i] * damp
+            if simd_length_squared(v) < sleep2 { v = .zero }
+            velocities[i] = v
         }
         for i in 0..<n { positions[i] = predicted[i] }
     }

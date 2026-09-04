@@ -31,5 +31,15 @@ settings:
    grows with iteration count (0.15 m/s interior mean at rest). A relaxation factor of
    0.5 cut it to ~0.03 m/s with density within 2.6% of water.
 
+3. **Dissipation and rest.** With no bulk energy loss, solver noise kept a few
+   particles moving (max 0.35 m/s at rest) and the surface looked like it was boiling on
+   the phone even though the mean was small. Real sloshing in a small bottle dies out in
+   a few seconds, so a dissipation time constant (2 s) was added, plus a rest threshold
+   (0.03 m/s, imperceptible) below which a particle is stopped. The harness now requires
+   both mean and maximum speed at rest to reach zero, and they do within 2 s.
+4. **Gravity input.** The device gravity vector is low-pass filtered (τ ≈ 0.12 s), and
+   when the phone is nearly flat (in-plane magnitude < 0.25 g) the direction is frozen,
+   because at that point it is mostly sensor noise and would shake the water.
+
 Reference numbers (vessel 100×200 pt, 60% fill, Apple Silicon Mac, `-O`): ~6 ms per
 60 Hz frame at 342 particles; ~570 particles for a full bottle.

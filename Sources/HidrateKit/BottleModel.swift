@@ -36,6 +36,8 @@ public final class HidrateBottleModel {
     public private(set) var capChangedAt: Date?
     public private(set) var latestWeight: WeightSample?
     public private(set) var stableRaw: Int?
+    /// Last settled level saved to disk, shown until a fresh reading arrives.
+    public private(set) var rememberedLevelML: Double?
     public private(set) var stableStreak = 0
     public private(set) var weightSampleCount = 0
     public private(set) var sips: [SipRecord] = []
@@ -64,6 +66,7 @@ public final class HidrateBottleModel {
             // A new calibration invalidates any level saved under the old one, so a
             // reconnect can't reconstruct a phantom drink across the change.
             store?.clearLastLevel()
+            rememberedLevelML = nil
             pendingRecoveryCheck = false
         }
     }
@@ -105,6 +108,7 @@ public final class HidrateBottleModel {
         if let baseline = store?.loadBaselineML() {
             tracker.reset(baselineML: baseline)
         }
+        rememberedLevelML = store?.loadLastLevel()?.levelML
         // Subscribe synchronously so nothing emitted before the task first runs is lost.
         let events = client.events()
         eventTask = Task { [weak self] in
@@ -128,6 +132,14 @@ public final class HidrateBottleModel {
     public var fillFraction: Double? {
         guard let calibration, calibration.isValid, let stableRaw else { return nil }
         return calibration.fillFraction(forRaw: Double(stableRaw))
+    }
+
+    /// Level to show: the live reading when we have one, otherwise the last one we saved.
+    public var displayLevelML: Double? { currentLevelML ?? rememberedLevelML }
+
+    public var displayFillFraction: Double? {
+        guard let calibration, calibration.isValid, let level = displayLevelML, calibration.capacityML > 0 else { return nil }
+        return min(max(level / calibration.capacityML, 0), 1)
     }
 
     /// The level the tracker is comparing against (last settled reading).
@@ -316,7 +328,9 @@ public final class HidrateBottleModel {
 
         if plausible {
             store?.saveBaselineML(tracker.baselineML)
-            store?.saveLastLevel(tracker.baselineML ?? levelML, date: date)
+            let level = tracker.baselineML ?? levelML
+            store?.saveLastLevel(level, date: date)
+            rememberedLevelML = level
         }
 
         guard let change, !change.isBaseline else { return }
