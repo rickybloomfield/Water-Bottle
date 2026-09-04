@@ -14,7 +14,16 @@ final class WatchAppDelegate: NSObject, WKApplicationDelegate {
                 WatchHydrationModel.shared.refresh()
                 HydrationStore.reloadWidgets()
             }
-            task.setTaskCompletedWithSnapshot(false)
+            // A snapshot task has its own completion and raises if finished with the
+            // general one — and watchOS schedules a snapshot right after launching the
+            // app from a complication, which is exactly when this was crashing.
+            if let snapshot = task as? WKSnapshotRefreshBackgroundTask {
+                snapshot.setTaskCompleted(restoredDefaultState: true,
+                                          estimatedSnapshotExpiration: .distantFuture,
+                                          userInfo: nil)
+            } else {
+                task.setTaskCompletedWithSnapshot(false)
+            }
         }
     }
 }

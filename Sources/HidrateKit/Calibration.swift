@@ -17,6 +17,15 @@ public struct BottleCalibration: Codable, Sendable, Equatable {
         self.calibratedAt = calibratedAt
     }
 
+    /// The same scale with a new zero.
+    ///
+    /// The load cell's zero wanders — hundreds of raw units in an hour is normal — while
+    /// how many raw units a millilitre is worth does not. So drift is fixed by
+    /// re-capturing empty alone, not by measuring empty and full again.
+    public func rezeroed(toEmptyRaw raw: Double) -> BottleCalibration {
+        BottleCalibration(emptyRaw: raw, fullRaw: raw + rawSpan, capacityML: capacityML)
+    }
+
     public static let millilitersPerUSFluidOunce = 29.5735
 
     public static func capacityML(ounces: Double) -> Double {

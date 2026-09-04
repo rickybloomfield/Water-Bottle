@@ -173,6 +173,14 @@ final class AppState {
     /// snapshot so the watch knows to stop counting them itself.
     var adoptedDrinkIDs: [UUID] = [] { didSet { defaults.set(adoptedDrinkIDs.map(\.uuidString), forKey: Keys.adopted) } }
 
+    /// The most recent time the zero moved, so the Bottle tab can say it happened.
+    struct ZeroMove: Equatable {
+        var shiftML: Double
+        var automatic: Bool
+        var date: Date
+    }
+    private(set) var lastZeroMove: ZeroMove?
+
     private(set) var healthTodayML: Double?
     private(set) var healthAuthorized = false
     /// Today's water samples written by *other* apps (ours are already in `entries`).
@@ -264,6 +272,12 @@ final class AppState {
         model.onLevelChange = { [weak self] event in self?.handle(event) }
         model.onSettledReading = { [weak self] reading in
             if let line = reading.logLine { self?.sessionLog.write(line) }
+        }
+        model.onZeroMoved = { [weak self] shiftML, automatic in
+            guard let self else { return }
+            sessionLog.write(String(format: "zero moved %@ by %.0f mL", automatic ? "automatically" : "by hand", shiftML))
+            lastZeroMove = ZeroMove(shiftML: shiftML, automatic: automatic, date: Date())
+            publishSnapshot()
         }
         model.onSip = { [weak self] record in self?.handle(record) }
         model.onEvent = { [weak self] event in self?.sessionLog.record(event) }
@@ -555,6 +569,17 @@ final class AppState {
         sessionLog.write(String(format: "calibration saved empty=%.1f full=%.1f capacity=%.0f scale=%.3f raw/mL", emptyRaw, fullRaw, capacityML, calibration.rawUnitsPerML))
         model.calibration = calibration
         if model.isConnected { model.client.setLED(.calibrationSuccess) }  // green glow
+    }
+
+    /// Take the reading in hand as a new empty point, keeping the scale. What drift
+    /// actually needs — and far less work than measuring empty and full again.
+    @discardableResult
+    func rezeroToCurrentReading() -> Double? {
+        guard let shift = model.rezeroToCurrentReading() else {
+            lastError = "No steady reading yet. Set the bottle on a flat surface and wait a few seconds."
+            return nil
+        }
+        return shift
     }
 
     func clearCalibration() {

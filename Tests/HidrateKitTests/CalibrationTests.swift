@@ -230,3 +230,30 @@ struct RememberedLevelTests {
         #expect(abs(after.milliliters(forRaw: raw) - 322.0) < 0.5)
     }
 }
+
+@Suite("Re-zeroing")
+struct RezeroTests {
+    let calibration = BottleCalibration(emptyRaw: 23089, fullRaw: 23946, capacityML: 621)
+
+    @Test func keepsTheScaleAndMovesTheZero() {
+        // The zero has drifted 520 raw units down: an empty bottle reads far below empty.
+        let drifted = 22569.0
+        #expect(calibration.milliliters(forRaw: drifted) < -350)
+
+        let rezeroed = calibration.rezeroed(toEmptyRaw: drifted)
+        #expect(abs(rezeroed.rawUnitsPerML - calibration.rawUnitsPerML) < 0.0001)
+        #expect(rezeroed.capacityML == calibration.capacityML)
+        // The reading that set the zero now reads empty, and a full bottle still reads full.
+        #expect(abs(rezeroed.milliliters(forRaw: drifted)) < 0.001)
+        #expect(abs(rezeroed.milliliters(forRaw: drifted + calibration.rawSpan) - 621) < 0.001)
+    }
+
+    /// A drink measured before the re-zero must measure the same after it: only the
+    /// origin moved, so differences are untouched.
+    @Test func differencesSurviveTheMove() {
+        let rezeroed = calibration.rezeroed(toEmptyRaw: 22569)
+        let before = calibration.milliliters(forRaw: 23500) - calibration.milliliters(forRaw: 23300)
+        let after = rezeroed.milliliters(forRaw: 23500) - rezeroed.milliliters(forRaw: 23300)
+        #expect(abs(before - after) < 0.001)
+    }
+}

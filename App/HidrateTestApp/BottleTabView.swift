@@ -3,6 +3,8 @@ import SwiftUI
 
 /// Everything about the bottle itself: connection, hardware details, calibration.
 struct BottleTabView: View {
+    @State private var rezeroMessage: String?
+
     @Environment(AppState.self) private var app
     @State private var showScanner = false
 
@@ -17,6 +19,9 @@ struct BottleTabView: View {
                 if !model.deviceInformation.isEmpty || model.bottleCapacityML != nil { aboutSection }
             }
             .navigationTitle("Bottle")
+            .alert("Zero set", isPresented: Binding(get: { rezeroMessage != nil }, set: { if !$0 { rezeroMessage = nil } })) {
+                Button("OK", role: .cancel) {}
+            } message: { Text(rezeroMessage ?? "") }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Find bottle", systemImage: "magnifyingglass") { showScanner = true }
@@ -78,11 +83,12 @@ struct BottleTabView: View {
                     LabeledContent("In the bottle", value: app.volume(level))
                     LabeledContent("Fill", value: "\(Int((fraction * 100).rounded()))%")
                     if let drift = model.zeroDriftML, drift > 0 {
-                        Label("Reading \(app.volume(drift)) below the empty point — the scale has drifted. Recalibrate empty to fix the level.",
+                        Label("Reading \(app.volume(drift)) below empty — the zero has drifted.",
                               systemImage: "exclamationmark.triangle")
                             .font(.footnote)
                             .foregroundStyle(.orange)
                     }
+                    rezeroButton
                 } else {
                     Label("Waiting for a steady reading. Set the bottle on a flat surface.", systemImage: "hourglass")
                         .foregroundStyle(.secondary)
@@ -91,6 +97,19 @@ struct BottleTabView: View {
                 Label("Calibrate to see the water level", systemImage: "scalemass").foregroundStyle(.orange)
             }
         }
+    }
+
+    /// Drift moves where empty reads without changing the scale, so re-capturing empty is
+    /// the whole fix. The app does it on its own once readings sit below empty for a
+    /// while; this is for doing it deliberately, with the bottle known to be empty.
+    private var rezeroButton: some View {
+        Button {
+            guard let shift = app.rezeroToCurrentReading() else { return }
+            rezeroMessage = "Zero moved by \(app.volume(abs(shift))). The bottle now reads empty."
+        } label: {
+            Label("Bottle is empty — set the zero", systemImage: "scalemass")
+        }
+        .disabled(model.stableRaw == nil)
     }
 
     private var calibrationSection: some View {

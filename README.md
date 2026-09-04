@@ -78,6 +78,33 @@ open the app.
 The widget's timeline asks to be woken hourly and exactly at midnight — midnight so it
 never shows yesterday's number, hourly as a safety net for a day when the app never runs.
 
+## Calibration, and the zero that won't sit still
+
+Two numbers describe the bottle's scale: how many raw units a millilitre is worth, and
+where empty sits. Only the first is stable. Measured across a morning's session log, the
+resting reading drifts about **5 mL a minute** while nothing is happening, and it changes
+sign — it ran +3 mL/min before the bottle was emptied and −5 to −9 mL/min for an hour
+afterwards, decaying as it went. That is load-cell creep after a change in weight, not
+noise, and it means an absolute calibration is stale within the hour.
+
+So the app stops treating a full calibration as the fix for drift:
+
+* **Re-zeroing keeps the scale and moves only the empty point** — `rezeroed(toEmptyRaw:)`.
+  A drink measured before a re-zero measures the same after it, because only the origin
+  moved, so the tracker carries on uninterrupted.
+* **The Bottle tab has a one-tap "Bottle is empty — set the zero"**, which is the whole
+  correction. Measuring full again is unnecessary.
+* **It also happens on its own.** A bottle cannot hold less than nothing, so settled
+  readings that stay more than 25 mL below empty for three samples and 45 seconds mean the
+  zero has moved; the app moves it back and logs that it did. Before this, every one of
+  those readings was discarded as "bottle lifted" and nothing was logged at all — one real
+  session sat at −675 mL, tracking nothing, for over an hour.
+
+The trade: if the bottle drifts down far enough while it still holds water, the automatic
+re-zero will call that empty and the displayed level will be wrong until the next refill.
+Intake is unaffected — the tracker measures differences, and a drink after a re-zero still
+reads as a drink — and being wrong about the level beats discarding every reading.
+
 ## When the level reads below empty
 
 The bottle's scale drifts: over days its zero creeps down, so the raw reading can sit

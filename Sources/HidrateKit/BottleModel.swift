@@ -52,6 +52,16 @@ public final class HidrateBottleModel {
     /// change. A drink that goes unlogged leaves no other trace, so this is what makes
     /// the difference between "the tracker saw it and rejected it" and "it never arrived".
     public var onSettledReading: (@MainActor (SettledReading) -> Void)?
+    /// Called when the zero is moved, with how far it moved in millilitres and whether
+    /// the app or the drift correction asked for it.
+    public var onZeroMoved: (@MainActor (Double, Bool) -> Void)?
+
+    /// A settled reading this far below empty means the zero has drifted, not that the
+    /// bottle is holding negative water. Set to nil to leave the zero alone.
+    public var autoRezeroBelowML: Double? = -25
+    /// How many settled readings in a row, over how long, before believing it.
+    public var autoRezeroSamples = 3
+    public var autoRezeroMinimumSeconds: TimeInterval = 45
     /// Called on the main actor for every sip record the bottle reports.
     public var onSip: (@MainActor (SipRecord) -> Void)?
     /// Called on the main actor for every raw event, before the model processes it.
@@ -108,6 +118,37 @@ public final class HidrateBottleModel {
         return recovered
     }
 
+    /// Move the zero to a reading taken with the bottle empty, keeping the scale. This is
+    /// what fixes drift: the level, the tracker and the saved reading all restart from a
+    /// known-empty bottle, and unlike a fresh calibration it needs no full capture.
+    @discardableResult
+    public func rezero(toRaw raw: Int, automatic: Bool) -> Double? {
+        guard let calibration = storedCalibration, calibration.isValid else { return nil }
+        let shift = calibration.milliliters(forRaw: Double(raw))
+        // Not through the setter: this keeps the scale, so it isn't a new calibration and
+        // must not throw away the level the tracker is measuring against.
+        storedCalibration = calibration.rezeroed(toEmptyRaw: Double(raw))
+        store?.saveCalibration(storedCalibration)
+        // This reading is empty by definition, so everything restarts from zero.
+        tracker.reset(baselineML: 0)
+        store?.saveBaselineML(0)
+        store?.saveLastLevel(0, date: Date())
+        rememberedRaw = raw
+        store?.saveLastRaw(raw, date: Date())
+        belowEmptyStreak = 0
+        belowEmptySince = nil
+        pendingRecoveryCheck = false
+        onZeroMoved?(shift, automatic)
+        return shift
+    }
+
+    /// Re-zero to the reading in hand. Returns nil when there isn't a settled one yet.
+    @discardableResult
+    public func rezeroToCurrentReading() -> Double? {
+        guard let stableRaw else { return nil }
+        return rezero(toRaw: stableRaw, automatic: false)
+    }
+
     /// What the model managed to restore, for the session log.
     public var restoredStateDescription: String {
         let baseline = tracker.baselineML.map { "\(Int($0.rounded()))mL" } ?? "none"
@@ -144,6 +185,8 @@ public final class HidrateBottleModel {
     /// True until the first settled reading of a session, which is the one that has to
     /// account for anything drunk while the bottle was away.
     private var awaitingFirstSettledReading = false
+    private var belowEmptyStreak = 0
+    private var belowEmptySince: Date?
     private var stableSubscribers: [UUID: AsyncStream<Int>.Continuation] = [:]
     private var eventTask: Task<Void, Never>?
     private let store: CalibrationStore?
@@ -391,6 +434,23 @@ public final class HidrateBottleModel {
         guard let calibration, calibration.isValid else { return }
         tracker.capacityML = calibration.capacityML
         let levelML = calibration.milliliters(forRaw: Double(raw))
+
+        // A bottle cannot hold less than nothing. Settled readings that keep coming in
+        // below empty mean the load cell's zero has moved, and until it is moved back
+        // every reading is discarded as "lifted" and nothing is ever logged.
+        if let threshold = autoRezeroBelowML, levelML < threshold {
+            belowEmptyStreak += 1
+            let since = belowEmptySince ?? date
+            belowEmptySince = since
+            if belowEmptyStreak >= autoRezeroSamples,
+               date.timeIntervalSince(since) >= autoRezeroMinimumSeconds {
+                rezero(toRaw: raw, automatic: true)
+                return
+            }
+        } else {
+            belowEmptyStreak = 0
+            belowEmptySince = nil
+        }
 
         // A below-empty reading means the bottle is lifted/tilted; don't anchor to it.
         let plausible = levelML >= tracker.configuration.liftedBelowML
