@@ -70,6 +70,21 @@ complication transfer only when the number on the face would actually change.
 The home-screen sizes are dark whatever the phone's appearance, to sit with the widgets
 they sit among. The lock-screen sizes are left to the system, which renders those itself.
 
+## One question, one answer
+
+How much water was drunk on a given day is asked in three places — Today, a day opened
+from Progress, and the row in the day list — and for a while they answered differently.
+The row read a HealthKit statistics collection query; the others summed the samples. On a
+real account the collection query came back with exactly the day's samples *minus the ones
+this app had written*: two days checked, each short by precisely our own contribution,
+while a sample query over the same window returned all of them. Whatever the cause, the
+lesson stands on its own — `dailyTotalsML` now buckets the samples itself, so every screen
+is answered by one query under one rule.
+
+`AppState.dailyTotals(days:)` adds the drinks this app holds that never reached Health, the
+same as a single day does, so a failed write cannot put a row out of step with the day it
+opens either.
+
 ## Keeping up while nothing is on screen
 
 Four things wake the app, and each ends in the same place — republish the snapshot, reload

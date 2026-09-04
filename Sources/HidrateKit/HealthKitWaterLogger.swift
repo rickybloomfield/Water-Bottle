@@ -211,28 +211,23 @@ public final class HealthKitWaterLogger: @unchecked Sendable {
 
     /// Water logged per calendar day (by any app) for the last `days` days, keyed by the
     /// start of each day. Days with nothing logged are omitted.
+    /// Water logged per calendar day for the last `days` days, by any app.
+    ///
+    /// Summed from the samples themselves rather than with a statistics collection
+    /// query. Measured on a real account, a collection query returned exactly the day's
+    /// samples minus the ones this app had written — two days checked, each short by
+    /// precisely our own contribution, while a sample query over the same window
+    /// returned all of them. Bucketing here also means a list of days and a single day
+    /// are answered by one query under one rule, so the two cannot drift apart again.
     public func dailyTotalsML(days: Int, calendar: Calendar = .current) async throws -> [Date: Double] {
-        let endOfToday = calendar.startOfDay(for: Date()).addingTimeInterval(86_400)
-        guard let start = calendar.date(byAdding: .day, value: -(days - 1), to: calendar.startOfDay(for: Date())) else { return [:] }
-        let predicate = HKQuery.predicateForSamples(withStart: start, end: endOfToday)
-        let descriptor = HKStatisticsCollectionQueryDescriptor(
-            predicate: .quantitySample(type: waterType, predicate: predicate),
-            options: .cumulativeSum,
-            anchorDate: calendar.startOfDay(for: Date()),
-            intervalComponents: DateComponents(day: 1)
-        )
-        let collection = try await descriptor.result(for: store)
-        var result: [Date: Double] = [:]
-        collection.enumerateStatistics(from: start, to: endOfToday) { statistics, _ in
-            if let sum = statistics.sumQuantity()?.doubleValue(for: self.unit), sum > 0 {
-                // Keyed by the day, not by the bucket's own start: the collection is
-                // anchored to this morning and stepped a day at a time, and a caller
-                // looking a total up by `startOfDay` needs the two to agree across every
-                // clock change in between.
-                result[calendar.startOfDay(for: statistics.startDate), default: 0] += sum
-            }
+        let startOfToday = calendar.startOfDay(for: Date())
+        let endOfToday = startOfToday.addingTimeInterval(86_400)
+        guard let start = calendar.date(byAdding: .day, value: -(days - 1), to: startOfToday) else { return [:] }
+        var totals: [Date: Double] = [:]
+        for sample in try await samples(from: start, to: endOfToday) {
+            totals[calendar.startOfDay(for: sample.date), default: 0] += sample.milliliters
         }
-        return result
+        return totals
     }
 }
 #endif
