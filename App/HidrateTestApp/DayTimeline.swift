@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The days either side of the one being looked at, so swiping has somewhere visible to
-/// go. Newest on the right, which is the direction the Today tab pages in.
+/// The days either side of the one being looked at. Scroll it and it settles on a day,
+/// which becomes the day on screen — no tap needed, though tapping works too.
 struct DayTimeline: View {
     @Namespace private var highlight
 
@@ -10,38 +10,48 @@ struct DayTimeline: View {
     /// Chosen from the strip rather than swiped to; the screen animates it the same way.
     var onPick: (Date) -> Void
 
+    /// Which day the strip has come to rest on. Kept apart from `selected` so a scroll
+    /// settling and a page swipe can each drive the other without chasing their own tail.
+    @State private var settledOn: Date?
+
+    private var calendar: Calendar { .current }
+
     var body: some View {
         GeometryReader { proxy in
-            ScrollViewReader { scroller in
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(days, id: \.self) { day in
-                            chip(day).id(day)
-                        }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(days, id: \.self) { day in
+                        chip(day).id(day)
                     }
-                    // Drives the highlight from one day to the next. The page swipe sets
-                    // the day without an animation of its own, so this supplies it.
-                    .animation(.snappy(duration: 0.25), value: selected)
-                    // Half the width either side, so the first and last days can sit in
-                    // the middle too. Without it the selected day is stuck against
-                    // whichever edge it happens to be near — and the one you are on is
-                    // usually today, which is the last.
-                    .padding(.horizontal, proxy.size.width / 2)
-                    .padding(.vertical, 10)
                 }
-                .onAppear { scroller.scrollTo(selected, anchor: .center) }
-                .onChange(of: selected) { _, day in
-                    withAnimation(.snappy) { scroller.scrollTo(day, anchor: .center) }
-                }
+                .scrollTargetLayout()
+                .padding(.vertical, 10)
+            }
+            // Half the width either side, so the first and last days can come to rest in
+            // the middle as well. Applied outside the target layout so it doesn't become
+            // something the scroll can stop on.
+            .safeAreaPadding(.horizontal, proxy.size.width / 2)
+            .scrollTargetBehavior(.viewAligned)
+            .scrollPosition(id: $settledOn, anchor: .center)
+            .onAppear { settledOn = selected }
+            .onChange(of: settledOn) { _, day in
+                guard let day, !calendar.isDate(day, inSameDayAs: selected) else { return }
+                onPick(day)
+            }
+            .onChange(of: selected) { _, day in
+                guard settledOn.map({ !calendar.isDate($0, inSameDayAs: day) }) ?? true else { return }
+                withAnimation(.snappy(duration: 0.25)) { settledOn = day }
             }
         }
         .frame(height: 52)
-        // The same material the navigation bar uses, so the two read as one surface.
-        .background(.bar)
+        // Opaque and the same colour the navigation bar resolves to, rather than a
+        // material of its own: two materials over different things do not match, which
+        // is what left a seam between the strip and the bar above it.
+        .background(Color(.systemBackground))
     }
 
     private func chip(_ day: Date) -> some View {
-        let isSelected = Calendar.current.isDate(day, inSameDayAs: selected)
+        let isSelected = calendar.isDate(day, inSameDayAs: selected)
         return Button {
             onPick(day)
         } label: {
@@ -52,7 +62,7 @@ struct DayTimeline: View {
                 .padding(.vertical, 7)
                 .background {
                     // One capsule for the whole strip, handed from day to day, so it
-                    // slides rather than appearing somewhere else.
+                    // travels rather than appearing somewhere else.
                     if isSelected {
                         Capsule()
                             .fill(Color.accentColor)
@@ -62,6 +72,9 @@ struct DayTimeline: View {
                 .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        // On the chips rather than the row: the strip's own scrolling animates itself,
+        // and driving both from one place made the highlight stutter against it.
+        .animation(.snappy(duration: 0.25), value: isSelected)
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 

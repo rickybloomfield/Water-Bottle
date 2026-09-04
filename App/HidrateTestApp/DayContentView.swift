@@ -15,6 +15,8 @@ struct DayContentView: View {
 
     @State private var items: [AppState.TodayItem] = []
     @State private var loaded = false
+    /// 0 while the drinks are at rest, 1 once they have scrolled up under the header.
+    @State private var scrolledUnder: CGFloat = 0
 
     private var isToday: Bool { Calendar.current.isDateInToday(day) }
     private var heroHeight: CGFloat { isToday ? 206 : 176 }
@@ -43,7 +45,9 @@ struct DayContentView: View {
             // Opaque and above the list, with an edge shadow, so the drinks read as
             // passing behind it rather than being clipped by nothing in particular.
             .background(Color(.systemGroupedBackground))
-            .shadow(color: .black.opacity(0.12), radius: 7, y: 4)
+            // Tracks the scroll rather than being switched on: nothing is behind the
+            // header until the drinks start passing under it.
+            .shadow(color: .black.opacity(0.14 * scrolledUnder), radius: 7, y: 4)
             .zIndex(1)
 
             List {
@@ -51,6 +55,7 @@ struct DayContentView: View {
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
+            .trackScrolledUnder($scrolledUnder)
         }
         .background(Color(.systemGroupedBackground))
         .task(id: app.entriesRevision) { await reload() }
