@@ -365,18 +365,30 @@ final class AppState {
             .sorted { $0.date > $1.date }
     }
 
-    /// Water per day for the last `days` days, from Apple Health so it covers every
-    /// source and survives a reinstall, falling back to this app's own entries.
+    /// Water per day for the last `days` days.
+    ///
+    /// Counted the same way a single day is on screen, which is the point: Apple Health
+    /// for everything that reached it, plus this app's own drinks that did not. Reading
+    /// Health alone left a day's row disagreeing with the day itself for any drink the
+    /// app holds but Health never got — and no amount of reloading would settle it,
+    /// because the two were adding up different things.
     func dailyTotals(days: Int, calendar: Calendar = .current) async -> [Date: Double] {
-        if HealthKitWaterLogger.isAvailable, healthAuthorized,
-           let fromHealth = try? await health.dailyTotalsML(days: days), !fromHealth.isEmpty {
-            return fromHealth
-        }
-        // The same window Health would have been asked for, so a caller paging back
-        // sees the fallback behave the same way.
+        // The window Health is asked for, so a caller paging back sees the app's own
+        // entries bounded the same way.
         let cutoff = calendar.date(byAdding: .day, value: -(days - 1), to: calendar.startOfDay(for: Date()))
+        func inWindow(_ entry: IntakeEntry) -> Bool { cutoff.map { entry.date >= $0 } ?? true }
+
         var totals: [Date: Double] = [:]
-        for entry in entries where cutoff.map({ entry.date >= $0 }) ?? true {
+        var health: [Date: Double]?
+        if HealthKitWaterLogger.isAvailable, healthAuthorized {
+            health = try? await self.health.dailyTotalsML(days: days)
+        }
+        if let health, !health.isEmpty {
+            for (day, ml) in health { totals[calendar.startOfDay(for: day), default: 0] += ml }
+        }
+        for entry in entries where inWindow(entry) {
+            // Health already counted the ones it has.
+            guard health == nil || entry.healthKitUUID == nil else { continue }
             totals[calendar.startOfDay(for: entry.date), default: 0] += entry.volumeML
         }
         return totals

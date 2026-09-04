@@ -225,7 +225,11 @@ public final class HealthKitWaterLogger: @unchecked Sendable {
         var result: [Date: Double] = [:]
         collection.enumerateStatistics(from: start, to: endOfToday) { statistics, _ in
             if let sum = statistics.sumQuantity()?.doubleValue(for: self.unit), sum > 0 {
-                result[statistics.startDate] = sum
+                // Keyed by the day, not by the bucket's own start: the collection is
+                // anchored to this morning and stepped a day at a time, and a caller
+                // looking a total up by `startOfDay` needs the two to agree across every
+                // clock change in between.
+                result[calendar.startOfDay(for: statistics.startDate), default: 0] += sum
             }
         }
         return result

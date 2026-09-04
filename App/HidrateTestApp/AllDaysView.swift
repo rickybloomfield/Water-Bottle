@@ -89,9 +89,11 @@ struct AllDaysView: View {
     private func load() async {
         guard !loading else { return }
         loading = true
+        // Cleared however this returns: a flag left set would quietly turn every later
+        // reload into a no-op, which looks exactly like a list that refuses to update.
+        defer { loading = false }
         daily = await app.dailyTotals(days: lookbackDays)
         loadedOnce = true
-        loading = false
     }
 
     /// Ask for another stretch. Only ever extends the window, so what is already on
