@@ -42,6 +42,7 @@ struct HistoryView: View {
                     .pickerStyle(.segmented)
 
                     chartCard
+                    recentDaysCard
                     statsGrid
                 }
                 .padding(.horizontal)
@@ -137,6 +138,65 @@ struct HistoryView: View {
             s.monthTotalML = daily.filter { month.contains($0.key) }.values.reduce(0, +)
         }
         return s
+    }
+
+    // MARK: - Days
+
+    /// A way in to any recent day, to see what it holds and put right what it doesn't.
+    /// The chart says how much; this says what.
+    private var recentDaysCard: some View {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let days = (0..<14).compactMap { calendar.date(byAdding: .day, value: -$0, to: today) }
+        return VStack(alignment: .leading, spacing: 0) {
+            Text("Days")
+                .font(.headline)
+                .padding(.horizontal, 18)
+                .padding(.top, 18)
+                .padding(.bottom, 10)
+            ForEach(Array(days.enumerated()), id: \.element) { index, day in
+                NavigationLink { DayDetailView(day: day) } label: { dayRow(day) }
+                    .buttonStyle(.plain)
+                if index < days.count - 1 {
+                    Divider().padding(.leading, 18)
+                }
+            }
+        }
+        .padding(.bottom, 6)
+        .background(.background, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+
+    private func dayRow(_ day: Date) -> some View {
+        let calendar = Calendar.current
+        // Today's total is live; the rest come from the same daily figures the chart uses.
+        let ml = calendar.isDateInToday(day) ? app.todayTotalML : (daily[day] ?? 0)
+        let reached = app.dailyGoalML > 0 && ml >= app.dailyGoalML
+        return HStack(spacing: 14) {
+            Image(systemName: reached ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(reached ? Color.green : Color.secondary.opacity(0.5))
+                .font(.title3)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(dayLabel(day, calendar: calendar)).font(.body.weight(.medium))
+                Text(day.formatted(.dateTime.day().month(.abbreviated)))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text(ml > 0 ? app.volume(ml) : "—")
+                .font(.body.monospacedDigit())
+                .foregroundStyle(ml > 0 ? .primary : .secondary)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+
+    private func dayLabel(_ day: Date, calendar: Calendar) -> String {
+        if calendar.isDateInToday(day) { return "Today" }
+        if calendar.isDateInYesterday(day) { return "Yesterday" }
+        return day.formatted(.dateTime.weekday(.wide))
     }
 
     // MARK: - Chart

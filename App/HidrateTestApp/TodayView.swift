@@ -152,21 +152,7 @@ struct TodayView: View {
                 }
             } else {
                 ForEach(items) { item in
-                    switch item {
-                    case .entry(let entry):
-                        drinkRow(entry)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) { pendingDelete = entry } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                                // A destructive role is red by default, but the app tints
-                                // itself blue and a swipe action takes the tint it
-                                // inherits, which left the delete button blue.
-                                .tint(.red)
-                            }
-                    case .health(let sample):
-                        healthRow(sample)
-                    }
+                    DrinkItemRow(item: item, onOpen: { detail = item }, onDelete: { pendingDelete = $0 })
                 }
             }
         } header: {
@@ -176,73 +162,6 @@ struct TodayView: View {
                 Text("\(items.count)")
             }
         }
-    }
-
-    private func drinkRow(_ entry: IntakeEntry) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: entry.source.symbolName)
-                .foregroundStyle(.blue)
-                .frame(width: 28, height: 28)
-                .background(Color.blue.opacity(0.12), in: Circle())
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text(app.volume(entry.volumeML)).font(.body.weight(.semibold))
-                    if entry.approximate { Text("≈").foregroundStyle(.orange) }
-                }
-                Text("\(entry.source.rowLabel) · \(entry.date.formatted(date: .omitted, time: .shortened))")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Image(systemName: entry.healthKitUUID == nil ? "heart" : "heart.fill")
-                .foregroundStyle(entry.healthKitUUID == nil ? Color.secondary : Color.pink)
-                .font(.subheadline)
-                .accessibilityLabel(entry.healthKitUUID == nil ? "Not saved to Health" : "Saved to Health")
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-        .onTapGesture { detail = .entry(entry) }
-        .accessibilityHint(entry.source.isHandLogged ? "Double tap to edit" : "Double tap for details")
-        .contextMenu {
-            if entry.source.isHandLogged {
-                Button("Edit", systemImage: "pencil") { detail = .entry(entry) }
-            } else {
-                Button("Details", systemImage: "info.circle") { detail = .entry(entry) }
-            }
-            if entry.healthKitUUID == nil {
-                Button("Save to Health", systemImage: "heart") { Task { await app.logToHealth(entry) } }
-            }
-            Button("Delete", systemImage: "trash", role: .destructive) { pendingDelete = entry }
-        }
-    }
-
-    /// Water another app wrote to Health. Read-only here; it counts toward the goal.
-    private func healthRow(_ sample: WaterSample) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: "heart.fill")
-                .foregroundStyle(.pink)
-                .frame(width: 28, height: 28)
-                .background(Color.pink.opacity(0.12), in: Circle())
-            VStack(alignment: .leading, spacing: 2) {
-                Text(app.volume(sample.milliliters)).font(.body.weight(.semibold))
-                Text("\(sample.sourceName) · \(sample.date.formatted(date: .omitted, time: .shortened))")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Text("Health").font(.caption2.weight(.semibold))
-                .padding(.horizontal, 7).padding(.vertical, 3)
-                .background(Color.pink.opacity(0.12), in: Capsule())
-                .foregroundStyle(.pink)
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.vertical, 4)
-        .contentShape(Rectangle())
-        .onTapGesture { detail = .health(sample) }
-        .accessibilityHint("Double tap for details")
     }
 
     // MARK: - Manual add

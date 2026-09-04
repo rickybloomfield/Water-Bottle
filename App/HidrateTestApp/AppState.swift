@@ -356,6 +356,27 @@ final class AppState {
             .sorted { $0.date > $1.date }
     }
 
+    func entries(on day: Date, calendar: Calendar = .current) -> [IntakeEntry] {
+        entries.filter { calendar.isDate($0.date, inSameDayAs: day) }
+    }
+
+    /// Everything drunk on a given day, the app's own and other apps' Health samples,
+    /// newest first. Today's is held in memory; any other day is read from Health.
+    func items(on day: Date, calendar: Calendar = .current) async -> [TodayItem] {
+        if calendar.isDateInToday(day) { return todayItems }
+        let mine = entries(on: day)
+        var external: [WaterSample] = []
+        if HealthKitWaterLogger.isAvailable, healthAuthorized {
+            let start = calendar.startOfDay(for: day)
+            let end = calendar.date(byAdding: .day, value: 1, to: start) ?? day
+            let written = Set(mine.compactMap(\.healthKitUUID))
+            external = ((try? await health.samples(from: start, to: end)) ?? [])
+                .filter { !$0.isFromThisApp && !written.contains($0.id) }
+        }
+        return (mine.map(TodayItem.entry) + external.map(TodayItem.health))
+            .sorted { $0.date > $1.date }
+    }
+
     private func handle(_ event: LevelChangeEvent) {
         sessionLog.write("levelChange \(event.change)\(event.approximate ? " [recovered]" : "") raw=\(event.stableRaw)")
         guard intakeSource == .weight, case .drink(let volume, let from, let to) = event.change else { return }
