@@ -201,11 +201,8 @@ struct HistoryView: View {
                 .opacity(selectedBucket == nil || selectedBucket == b ? 1 : 0.5)
             }
             RuleMark(y: .value("Goal", goal))
-                .foregroundStyle(.secondary)
-                .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                .annotation(position: .top, alignment: .trailing) {
-                    Text("Goal").font(.caption2).foregroundStyle(.secondary)
-                }
+                .foregroundStyle(Color.orange)
+                .lineStyle(StrokeStyle(lineWidth: 2, dash: [6, 4]))
         }
         .chartXSelection(value: $selectedDate)
         .chartXAxis {

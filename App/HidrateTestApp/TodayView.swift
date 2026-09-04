@@ -94,19 +94,15 @@ struct TodayView: View {
                 .animation(.spring(duration: 0.8), value: app.goalProgress)
             VStack(spacing: 0) {
                 Text(app.volumeNumber(app.todayTotalML))
-                    .font(.system(size: 46, weight: .bold, design: .rounded))
+                    .font(.system(size: 48, weight: .bold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(reached ? Color.green : Color.primary)
                     .contentTransition(.numericText())
                     .animation(.snappy, value: app.todayTotalML)
-                Text(app.unit.symbol)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, -2)
                 Text("Goal \(app.volume(app.dailyGoalML))")
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(reached ? Color.green : Color.secondary)
-                    .padding(.top, 8)
+                    .padding(.top, 6)
             }
         }
         .animation(.easeInOut(duration: 0.5), value: reached)
