@@ -59,15 +59,30 @@ Keeping the three of them agreeing takes three rules:
 * **A drink from the watch goes out twice**, as a live message and as a queued transfer.
   The phone keys drinks by id, so arriving twice costs nothing, and arriving late does.
 
+The circular complication is the one ring the app does not draw. Matching Apple's by
+measurement was tried twice and missed twice: a fraction of the slot came out heavier than
+everything beside it, because the slot is bigger than the circle the system draws in it,
+and taking the size from a gauge at `fixedSize` came out a tenth of the size, because a
+gauge reports about 50 pt of ideal size inside an app and about 10 pt inside a widget. The
+number that mattered could not be measured anywhere it could also be used. Measured off a
+photograph of a real watch face, every system complication on it — heart rate, Activity,
+the corner — is a 45 pt circle with a 5 pt stroke, and none of them fills its slot.
+
+So that ring is the system's own gauge, which is what Weather draws. It matches on every
+watch and on the lock screen because it is the same object. The cost is the pace marker and
+the second lap, which a gauge cannot draw: past the goal it fills and turns green, and the
+number carries how far past. Both are still on every ring the app sizes itself.
+
 Past the goal the ring keeps going, in one shade the whole way round — it should read as
 one ring that went further, not as a ring that started over. What separates the second lap
 from the first is a soft shadow laid just ahead of its leading end. A shadow rather than a
 second colour, because a watch face and the lock screen render a complication in a single
 colour: a difference in brightness survives that, a difference in hue does not.
 
-Every ring carries a tick showing where the day's pace says you should be by now, spread
-evenly across the drink window from the reminder settings — ahead of the tick you're on
-track, behind it you're falling back. The complication has no room for a unit, so it shows
+Every ring the app draws carries a tick showing where the day's pace says you should be by
+now, spread evenly across the drink window from the reminder settings — ahead of the tick
+you're on track, behind it you're falling back. The circular complication is the exception,
+for the reason below. The complication has no room for a unit, so it shows
 the number alone; whether that number is ounces or millilitres follows the app's setting. The phone spends a budgeted
 complication transfer only when the number on the face would actually change.
 
