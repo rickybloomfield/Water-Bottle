@@ -6,7 +6,7 @@ struct TodayView: View {
     @State private var showManualAdd = false
     @State private var manualML = 8 * VolumeUnit.mlPerOunce
     @State private var pendingDelete: IntakeEntry?
-    @State private var editing: IntakeEntry?
+    @State private var detail: AppState.TodayItem?
 
     private var model: HidrateBottleModel { app.model }
 
@@ -39,7 +39,9 @@ struct TodayView: View {
             }
             .refreshable { await app.refreshHealthTotal() }
             .sheet(isPresented: $showManualAdd) { manualAddSheet }
-            .sheet(item: $editing) { EditDrinkView(entry: $0) }
+            .sheet(item: $detail) { item in
+                DrinkDetailView(item: item) { entry in pendingDelete = entry }
+            }
             .overlay {
                 if app.showCelebration {
                     CelebrationView(isPresented: $app.showCelebration,
@@ -195,21 +197,19 @@ struct TodayView: View {
                 .foregroundStyle(entry.healthKitUUID == nil ? Color.secondary : Color.pink)
                 .font(.subheadline)
                 .accessibilityLabel(entry.healthKitUUID == nil ? "Not saved to Health" : "Saved to Health")
-            if entry.source.isHandLogged {
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-            }
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 4)
-        // Only what you typed in. A drink the bottle weighed is a measurement, and
-        // editing it would quietly disagree with the level the app is tracking.
         .contentShape(Rectangle())
-        .onTapGesture { if entry.source.isHandLogged { editing = entry } }
-        .accessibilityHint(entry.source.isHandLogged ? "Double tap to edit" : "")
+        .onTapGesture { detail = .entry(entry) }
+        .accessibilityHint(entry.source.isHandLogged ? "Double tap to edit" : "Double tap for details")
         .contextMenu {
             if entry.source.isHandLogged {
-                Button("Edit", systemImage: "pencil") { editing = entry }
+                Button("Edit", systemImage: "pencil") { detail = .entry(entry) }
+            } else {
+                Button("Details", systemImage: "info.circle") { detail = .entry(entry) }
             }
             if entry.healthKitUUID == nil {
                 Button("Save to Health", systemImage: "heart") { Task { await app.logToHealth(entry) } }
@@ -235,8 +235,14 @@ struct TodayView: View {
                 .padding(.horizontal, 7).padding(.vertical, 3)
                 .background(Color.pink.opacity(0.12), in: Capsule())
                 .foregroundStyle(.pink)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture { detail = .health(sample) }
+        .accessibilityHint("Double tap for details")
     }
 
     // MARK: - Manual add
