@@ -37,7 +37,14 @@ struct DayContentView: View {
                 if isToday { statusRow }
             }
             .padding(.horizontal, 16)
-            .padding(.bottom, 12)
+            .padding(.top, 14)
+            .padding(.bottom, 14)
+            .frame(maxWidth: .infinity)
+            // Opaque and above the list, with an edge shadow, so the drinks read as
+            // passing behind it rather than being clipped by nothing in particular.
+            .background(Color(.systemGroupedBackground))
+            .shadow(color: .black.opacity(0.12), radius: 7, y: 4)
+            .zIndex(1)
 
             List {
                 drinksSection
