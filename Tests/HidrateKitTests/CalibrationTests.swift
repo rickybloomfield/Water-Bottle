@@ -62,12 +62,24 @@ struct StableWeightFilterTests {
 @Suite("Drift model")
 struct DriftModelTests {
     @Test func correctsForDriftButNeverGoesNegative() {
-        let drift = DriftModel(mlPerMinute: 15, maxGapSeconds: 3600)
+        let drift = DriftModel(mlPerMinute: 15, maxCorrectionML: .infinity, maxGapSeconds: 3600)
         // Over 4 minutes, 60 mL of the observed drop is drift.
         #expect(abs(drift.correctedDrop(observedDrop: 200, gapSeconds: 240) - 140) < 0.01)
         // Pure drift, no real drink: corrected drop is ~0, not negative.
         #expect(drift.correctedDrop(observedDrop: 60, gapSeconds: 240) <= 0.01)
         #expect(drift.correctedDrop(observedDrop: 10, gapSeconds: 600) <= 0.01)
+    }
+
+    /// The bottle disconnects every quarter of an hour, so the correction over a gap that
+    /// long has to leave a real drink standing.
+    @Test func aRealDrinkSurvivesTheUsualDisconnect() {
+        let drift = DriftModel()
+        // 12 oz taken while the bottle was away for fifteen minutes.
+        #expect(drift.correctedDrop(observedDrop: 355, gapSeconds: 900) > 300)
+        // And the correction stops growing rather than swallowing the drink whole.
+        #expect(drift.correctedDrop(observedDrop: 355, gapSeconds: 3600) > 300)
+        // Still nothing left of a drop that is only drift.
+        #expect(drift.correctedDrop(observedDrop: 20, gapSeconds: 900) <= 0.01)
     }
 }
 

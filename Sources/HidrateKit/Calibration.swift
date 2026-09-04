@@ -118,19 +118,41 @@ public enum LevelChange: Sendable, Hashable {
 /// handling. Used when recovering a level change measured across a disconnect gap.
 public struct DriftModel: Sendable, Equatable, Codable {
     /// How fast the resting reading falls on its own, in mL per minute (downward = positive).
+    ///
+    /// Measured from session logs, a PRO 2 settling after being handled moves about one
+    /// raw unit every ten to fifteen seconds — roughly 3 mL a minute — and between
+    /// handlings it drifts as readily up as down. The original 15 subtracted 225 mL over
+    /// the bottle's usual quarter-hour disconnect, which is more than a third of the
+    /// bottle: any drink taken while it was away was corrected out of existence.
     public var mlPerMinute: Double
+    /// Ceiling on the correction however long the gap. Drift is a slow wander around a
+    /// value, not a march in one direction, so it does not keep accumulating.
+    public var maxCorrectionML: Double
     /// Don't attempt drift-corrected recovery across gaps longer than this.
     public var maxGapSeconds: TimeInterval
 
-    public init(mlPerMinute: Double = 15, maxGapSeconds: TimeInterval = 3600) {
+    public init(mlPerMinute: Double = 3, maxCorrectionML: Double = 40, maxGapSeconds: TimeInterval = 3600) {
         self.mlPerMinute = mlPerMinute
+        self.maxCorrectionML = maxCorrectionML
         self.maxGapSeconds = maxGapSeconds
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case mlPerMinute, maxCorrectionML, maxGapSeconds
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = DriftModel()
+        mlPerMinute = try c.decodeIfPresent(Double.self, forKey: .mlPerMinute) ?? d.mlPerMinute
+        maxCorrectionML = try c.decodeIfPresent(Double.self, forKey: .maxCorrectionML) ?? d.maxCorrectionML
+        maxGapSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .maxGapSeconds) ?? d.maxGapSeconds
     }
 
     /// Correct an observed drop for drift over a gap. The correction never turns a real
     /// drop negative (it is clamped to the observed drop).
     public func correctedDrop(observedDrop: Double, gapSeconds: TimeInterval) -> Double {
-        let drift = mlPerMinute * gapSeconds / 60
+        let drift = min(mlPerMinute * gapSeconds / 60, maxCorrectionML)
         return observedDrop - min(drift, max(observedDrop, 0))
     }
 }

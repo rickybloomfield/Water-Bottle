@@ -48,6 +48,10 @@ public final class HidrateBottleModel {
 
     /// Called on the main actor for every detected drink or refill.
     public var onLevelChange: (@MainActor (LevelChangeEvent) -> Void)?
+    /// Called on the main actor for every settled reading, whether or not it produced a
+    /// change. A drink that goes unlogged leaves no other trace, so this is what makes
+    /// the difference between "the tracker saw it and rejected it" and "it never arrived".
+    public var onSettledReading: (@MainActor (SettledReading) -> Void)?
     /// Called on the main actor for every sip record the bottle reports.
     public var onSip: (@MainActor (SipRecord) -> Void)?
     /// Called on the main actor for every raw event, before the model processes it.
@@ -59,9 +63,13 @@ public final class HidrateBottleModel {
     public var maxLogEntries = 500
     public var maxRawValues = 200
 
+    private var storedCalibration: BottleCalibration?
+
     public var calibration: BottleCalibration? {
-        didSet {
-            store?.saveCalibration(calibration)
+        get { storedCalibration }
+        set {
+            storedCalibration = newValue
+            store?.saveCalibration(newValue)
             tracker.reset()
             store?.saveBaselineML(nil)
             // A new calibration invalidates any level saved under the old one, so a
@@ -71,6 +79,40 @@ public final class HidrateBottleModel {
             store?.clearLastLevel()
             pendingRecoveryCheck = false
         }
+    }
+
+    /// Re-read anything that wasn't there at launch, and say whether that found something.
+    ///
+    /// An app woken while the phone is still locked — which for this one is routine, since
+    /// CoreBluetooth relaunches it when the bottle reconnects — can come up before its
+    /// stored preferences are readable. It then runs with no calibration, and `trackLevel`
+    /// drops every reading it takes on the floor: the water level looks right on screen
+    /// but nothing is ever logged. Call this whenever protected data becomes available.
+    @discardableResult
+    public func reloadPersistedStateIfNeeded() -> Bool {
+        var recovered = false
+        if storedCalibration == nil, let calibration = store?.loadCalibration() {
+            // Assigned to the backing store, not through the setter: this is restoring
+            // what was already saved, not calibrating afresh.
+            storedCalibration = calibration
+            recovered = true
+        }
+        if tracker.baselineML == nil, let baseline = store?.loadBaselineML() {
+            tracker.reset(baselineML: baseline)
+            recovered = true
+        }
+        if rememberedRaw == nil, let raw = store?.loadLastRaw()?.raw {
+            rememberedRaw = raw
+            recovered = true
+        }
+        return recovered
+    }
+
+    /// What the model managed to restore, for the session log.
+    public var restoredStateDescription: String {
+        let baseline = tracker.baselineML.map { "\(Int($0.rounded()))mL" } ?? "none"
+        let raw = rememberedRaw.map(String.init) ?? "none"
+        return "calibration=\(storedCalibration == nil ? "none" : "yes") baseline=\(baseline) lastRaw=\(raw)"
     }
 
     public var trackerConfiguration: LevelTracker.Configuration {
@@ -99,6 +141,9 @@ public final class HidrateBottleModel {
     private var filter = StableWeightFilter(tolerance: 8, requiredSamples: 2)
     private var tracker = LevelTracker()
     private var pendingRecoveryCheck = false
+    /// True until the first settled reading of a session, which is the one that has to
+    /// account for anything drunk while the bottle was away.
+    private var awaitingFirstSettledReading = false
     private var stableSubscribers: [UUID: AsyncStream<Int>.Continuation] = [:]
     private var eventTask: Task<Void, Never>?
     private let store: CalibrationStore?
@@ -106,13 +151,13 @@ public final class HidrateBottleModel {
     public init(client: HidrateBottleClient = HidrateBottleClient(), store: CalibrationStore? = CalibrationStore()) {
         self.client = client
         self.store = store
-        calibration = store?.loadCalibration()
+        storedCalibration = store?.loadCalibration()
         if let baseline = store?.loadBaselineML() {
             tracker.reset(baselineML: baseline)
         }
         if let raw = store?.loadLastRaw()?.raw {
             rememberedRaw = raw
-        } else if let level = store?.loadLastLevel()?.levelML, let calibration, calibration.isValid {
+        } else if let level = store?.loadLastLevel()?.levelML, let calibration = storedCalibration, calibration.isValid {
             // Upgrading from a version that only saved millilitres: turn what it saved
             // back into a raw reading so the bottle isn't drawn empty on the first launch.
             rememberedRaw = Int(calibration.raw(forMilliliters: level).rounded())
@@ -301,6 +346,7 @@ public final class HidrateBottleModel {
                 // New live session: the next settled resting reading should be checked
                 // against the level saved before we disconnected.
                 pendingRecoveryCheck = recoverAcrossDisconnects
+                awaitingFirstSettledReading = true
             }
             if !state.isConnected {
                 filter.reset()
@@ -348,12 +394,22 @@ public final class HidrateBottleModel {
 
         // A below-empty reading means the bottle is lifted/tilted; don't anchor to it.
         let plausible = levelML >= tracker.configuration.liftedBelowML
+        let baselineBefore = tracker.baselineML
+        var recovered = false
         if pendingRecoveryCheck, plausible {
             pendingRecoveryCheck = false
-            recoverAcrossGap(currentLevelML: tracker.baselineML ?? levelML, at: date)
+            // With a baseline in hand the tracker below does the work; recovery is for the
+            // case where there isn't one, and compares against the level saved to disk.
+            recovered = recoverAcrossGap(currentLevelML: baselineBefore ?? levelML, at: date)
         }
 
         let change = tracker.ingest(levelML: levelML, at: date)
+        let wasFirst = awaitingFirstSettledReading
+        awaitingFirstSettledReading = false
+        onSettledReading?(SettledReading(
+            date: date, raw: raw, levelML: levelML, baselineBeforeML: baselineBefore,
+            change: change, recovered: recovered, plausible: plausible, isFirstOfSession: wasFirst
+        ))
 
         // Saved whatever the reading says. A bottle whose zero has drifted reads below
         // empty on every sample, and gating this on plausibility left nothing to draw at
@@ -372,28 +428,31 @@ public final class HidrateBottleModel {
         onLevelChange?(event)
     }
 
-    private func recoverAcrossGap(currentLevelML: Double, at date: Date) {
-        guard let previous = store?.loadLastLevel(), let capacity = calibration?.capacityML else { return }
+    /// Returns true when it logged a recovered drink.
+    @discardableResult
+    private func recoverAcrossGap(currentLevelML: Double, at date: Date) -> Bool {
+        guard let previous = store?.loadLastLevel(), let capacity = calibration?.capacityML else { return false }
         let gap = date.timeIntervalSince(previous.date)
-        guard gap > 30, gap <= driftModel.maxGapSeconds else { return }
+        guard gap > 30, gap <= driftModel.maxGapSeconds else { return false }
         // Both anchors must be plausible fill levels. Readings below empty or above
         // capacity mean the calibration was stale or the bottle was mid-handling; a
         // "drink" reconstructed from those is noise, not water. (This is what wrote a
         // phantom 137 mL from two negative levels after a recalibration.)
         let slack = 0.15 * capacity
         guard (-slack...(capacity + slack)).contains(previous.levelML),
-              (-slack...(capacity + slack)).contains(currentLevelML) else { return }
+              (-slack...(capacity + slack)).contains(currentLevelML) else { return false }
         // Only reconstruct DRINKS across a gap. An apparent increase while we were away is
         // far more likely surface/thermal offset than a real refill, so never log a
         // recovered refill.
         let observedDrop = previous.levelML - currentLevelML
-        guard observedDrop > 0 else { return }
+        guard observedDrop > 0 else { return false }
         let corrected = driftModel.correctedDrop(observedDrop: observedDrop, gapSeconds: gap)
-        guard corrected >= tracker.configuration.minDrinkML else { return }
+        guard corrected >= tracker.configuration.minDrinkML else { return false }
         let midpoint = previous.date.addingTimeInterval(gap / 2)
         let change = LevelChange.drink(volumeML: corrected, fromML: previous.levelML, toML: currentLevelML)
         let event = LevelChangeEvent(id: UUID(), date: midpoint, change: change, stableRaw: 0, approximate: true)
         levelChanges.insert(event, at: 0)
         onLevelChange?(event)
+        return true
     }
 }

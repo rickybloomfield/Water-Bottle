@@ -136,3 +136,46 @@ public enum BottleEvent: Sendable {
     case rawValue(CharacteristicValue)
     case log(LogEntry)
 }
+
+/// A settled reading and what the tracker made of it, for the session log.
+public struct SettledReading: Sendable, Hashable {
+    public var date: Date
+    public var raw: Int
+    public var levelML: Double
+    /// The level the change was measured against, or nil when the tracker had nothing to
+    /// compare with — which is how a drink goes missing without a trace.
+    public var baselineBeforeML: Double?
+    public var change: LevelChange?
+    /// A drink reconstructed from the level saved before the last disconnect.
+    public var recovered: Bool
+    /// False when the reading is far enough below empty to mean the bottle was lifted.
+    public var plausible: Bool
+    /// The first settled reading after connecting, which is the one that has to account
+    /// for anything drunk while the bottle was away.
+    public var isFirstOfSession: Bool
+
+    public init(date: Date, raw: Int, levelML: Double, baselineBeforeML: Double?,
+                change: LevelChange?, recovered: Bool, plausible: Bool, isFirstOfSession: Bool) {
+        self.date = date
+        self.raw = raw
+        self.levelML = levelML
+        self.baselineBeforeML = baselineBeforeML
+        self.change = change
+        self.recovered = recovered
+        self.plausible = plausible
+        self.isFirstOfSession = isFirstOfSession
+    }
+
+    /// One line for the session log. Only worth writing when something notable happened
+    /// or could have: the rest are two-second heartbeats.
+    public var logLine: String? {
+        guard isFirstOfSession || baselineBeforeML == nil || !plausible || recovered else { return nil }
+        let baseline = baselineBeforeML.map { String(Int($0.rounded())) } ?? "none"
+        let outcome = change.map { String(describing: $0) } ?? "no change"
+        var line = "settled raw=\(raw) level=\(Int(levelML.rounded()))mL baseline=\(baseline) → \(outcome)"
+        if recovered { line += " [recovered a drink across the gap]" }
+        if !plausible { line += " [below empty, not anchored]" }
+        if isFirstOfSession { line += " [first of session]" }
+        return line
+    }
+}

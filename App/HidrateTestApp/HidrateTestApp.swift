@@ -25,6 +25,7 @@ struct HidrateTestApp: App {
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .active:
+                app.reloadPersistedBottleState()
                 app.model.client.nudgeReconnect()
                 // Drinks tapped in the widget, water logged elsewhere in Health.
                 Task { await app.catchUp() }

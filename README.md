@@ -93,6 +93,29 @@ invalidating it, and a bottle whose zero has drifted — every sample below the 
 threshold, so nothing counted as settled — still leaves something to draw. Both of those
 used to end the same way: an empty bottle on the Today tab until the bottle reconnected.
 
+## When a drink goes missing
+
+Every settled reading now gets a line in the session log when there is anything to say
+about it — the first of a session, one taken with no baseline to compare against, one
+below empty, or one that recovered a drink across a disconnect. A drink that is silently
+dropped otherwise leaves no trace at all, which made the first real report of one take a
+log dump and a lot of arithmetic to explain.
+
+Two things were dropping them. The drift correction assumed the resting reading falls
+15 mL a minute, which over the bottle's usual quarter-hour disconnect subtracted 225 mL
+from any observed drop — more than a third of the bottle, so a drink taken while it was
+away was corrected out of existence. Session logs put the real figure nearer 3 mL a
+minute, wandering up as readily as down, so that is the default now, capped at 40 mL
+however long the gap.
+
+The other is worse and quieter. CoreBluetooth relaunches this app when the bottle
+reconnects, and that often happens while the phone is locked — where its stored
+preferences read back empty. The app then comes up with no calibration, and `trackLevel`
+returns at its first guard: the level looks right on screen but every reading is dropped
+and nothing is ever logged. `reloadPersistedStateIfNeeded()` re-reads what was missing
+when protected data becomes available, when the app comes forward, and on every
+background refresh.
+
 ## The water
 
 The bottle on the Today tab holds an animated water surface: a one-dimensional

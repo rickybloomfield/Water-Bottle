@@ -1,5 +1,6 @@
 import Foundation
 import HidrateKit
+import UIKit
 import Observation
 import UserNotifications
 
@@ -244,10 +245,22 @@ final class AppState {
             return self.snapshot
         }
         model.onLevelChange = { [weak self] event in self?.handle(event) }
+        model.onSettledReading = { [weak self] reading in
+            if let line = reading.logLine { self?.sessionLog.write(line) }
+        }
         model.onSip = { [weak self] record in self?.handle(record) }
         model.onEvent = { [weak self] event in self?.sessionLog.record(event) }
 
         healthAuthorized = HealthKitWaterLogger.isAvailable && health.canWrite
+        sessionLog.write("restored \(model.restoredStateDescription)")
+        // The phone can be locked when CoreBluetooth relaunches this app, and a locked
+        // phone's preferences read back empty. Pick them up the moment they can be read.
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.protectedDataDidBecomeAvailableNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.reloadPersistedBottleState() }
+        }
         model.reconnectLastBottle()
         startHealthObserver()
         adoptPendingDrinks()
@@ -255,6 +268,14 @@ final class AppState {
         // rather than whatever the defaults happen to be.
         publishSnapshot(force: true)
         Task { await refreshHealthTotal() }
+    }
+
+    /// Re-read the calibration and level saved on disk if the launch came up without
+    /// them. Without this the session runs uncalibrated and logs nothing it measures.
+    func reloadPersistedBottleState() {
+        guard model.reloadPersistedStateIfNeeded() else { return }
+        sessionLog.write("recovered state unreadable at launch: \(model.restoredStateDescription)")
+        publishSnapshot()
     }
 
     // MARK: - Tracker configuration
@@ -502,6 +523,7 @@ final class AppState {
     /// result back out.
     func backgroundRefresh() async {
         sessionLog.write("background refresh")
+        reloadPersistedBottleState()
         model.client.nudgeReconnect()
         await catchUp()
         // Reminders are laid down two days at a time and only for the slots you're behind
