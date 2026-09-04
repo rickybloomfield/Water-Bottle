@@ -12,6 +12,8 @@ struct DayContentView: View {
     let day: Date
     var onOpen: (AppState.TodayItem) -> Void
     var onDelete: (IntakeEntry) -> Void
+    /// How far this day's drinks have scrolled up, 0…1, for whatever sits above them.
+    var scrolledUnder: Binding<CGFloat> = .constant(0)
 
     @State private var items: [AppState.TodayItem] = []
     @State private var loaded = false
@@ -42,6 +44,7 @@ struct DayContentView: View {
             drinksSection
         }
         .listStyle(.insetGrouped)
+        .trackScrolledUnder(scrolledUnder)
         .task(id: app.entriesRevision) { await reload() }
         .onAppear { Task { await reload() } }
         .refreshable { await app.refreshHealthTotal(); await reload() }

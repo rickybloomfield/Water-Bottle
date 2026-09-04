@@ -11,6 +11,8 @@ struct TodayView: View {
     @State private var showManualAdd = false
     @State private var detail: AppState.TodayItem?
     @State private var pendingDelete: IntakeEntry?
+    /// How far the day on screen has been scrolled, so the strip can cast a line.
+    @State private var scrolledUnder: CGFloat = 0
 
     /// A month of swiping, oldest first so that dragging right lands on the day before.
     private var days: [Date] {
@@ -23,9 +25,11 @@ struct TodayView: View {
         @Bindable var app = app
         NavigationStack {
             VStack(spacing: 0) {
-                DayTimeline(days: days, selected: $selectedDay) { day in
+                DayTimeline(days: days, selected: $selectedDay, onPick: { day in
                     withAnimation(.snappy) { selectedDay = Calendar.current.startOfDay(for: day) }
-                }
+                }, scrolledUnder: scrolledUnder)
+                // Above the pages, so the line it casts falls on them.
+                .zIndex(1)
                 // The stock paged container: its drag has the rubber-banding and the
                 // part-way follow that a gesture of our own did not. It claims every
                 // sideways drag on the page, which is why the rows offer no swipe.
@@ -33,7 +37,8 @@ struct TodayView: View {
                     ForEach(days, id: \.self) { day in
                         DayContentView(day: day,
                                        onOpen: { detail = $0 },
-                                       onDelete: { pendingDelete = $0 })
+                                       onDelete: { pendingDelete = $0 },
+                                       scrolledUnder: $scrolledUnder)
                             .tag(day)
                     }
                 }
@@ -43,6 +48,8 @@ struct TodayView: View {
                 // lets the rest scroll behind it.
                 .ignoresSafeArea(.container, edges: .bottom)
             }
+            // A day arrived at is at its top; only scrolling moves it from there.
+            .onChange(of: selectedDay) { _, _ in scrolledUnder = 0 }
             .navigationTitle(selectedDay.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

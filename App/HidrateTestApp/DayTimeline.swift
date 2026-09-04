@@ -9,6 +9,8 @@ struct DayTimeline: View {
     @Binding var selected: Date
     /// Chosen from the strip rather than swiped to; the screen animates it the same way.
     var onPick: (Date) -> Void
+    /// 0…1 as the day's drinks scroll up beneath, which fades in the line under the strip.
+    var scrolledUnder: CGFloat = 0
 
     /// Which day the strip has come to rest on. Kept apart from `selected` so a scroll
     /// settling and a page swipe can each drive the other without chasing their own tail.
@@ -48,6 +50,15 @@ struct DayTimeline: View {
         // material of its own: two materials over different things do not match, which
         // is what left a seam between the strip and the bar above it.
         .background(Color(.systemBackground))
+        // A line under the bottom edge only, arriving as the day's drinks begin to pass
+        // beneath it. Nothing goes behind the strip's sides or its top.
+        .overlay(alignment: .bottom) {
+            LinearGradient(colors: [.black.opacity(0.12 * scrolledUnder), .clear],
+                           startPoint: .top, endPoint: .bottom)
+                .frame(height: 7)
+                .offset(y: 7)
+                .allowsHitTesting(false)
+        }
     }
 
     private func chip(_ day: Date) -> some View {
