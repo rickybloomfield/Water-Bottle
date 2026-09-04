@@ -356,6 +356,20 @@ final class AppState {
             .sorted { $0.date > $1.date }
     }
 
+    /// Water per day for the last `days` days, from Apple Health so it covers every
+    /// source and survives a reinstall, falling back to this app's own entries.
+    func dailyTotals(days: Int, calendar: Calendar = .current) async -> [Date: Double] {
+        if HealthKitWaterLogger.isAvailable, healthAuthorized,
+           let fromHealth = try? await health.dailyTotalsML(days: days), !fromHealth.isEmpty {
+            return fromHealth
+        }
+        var totals: [Date: Double] = [:]
+        for entry in entries {
+            totals[calendar.startOfDay(for: entry.date), default: 0] += entry.volumeML
+        }
+        return totals
+    }
+
     func entries(on day: Date, calendar: Calendar = .current) -> [IntakeEntry] {
         entries.filter { calendar.isDate($0.date, inSameDayAs: day) }
     }
