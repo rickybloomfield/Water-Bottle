@@ -101,7 +101,10 @@ Behavioural notes on 100.64.0:
 * **GATT reads are slow.** A batch of 18 reads issued right after connecting was answered
   ~40 s later, then at ~180 ms spacing. The bottle appears to service ATT requests only when
   it wakes, so keep reads to a minimum and never poll.
-* **Weight notifies every 15 s** regardless of activity (observed cadence 15.0 s).
+* **Weight notifies every 15 s at rest** (observed cadence 15.0 s), and **every 2–5 s
+  while the reading is changing**, backing off again about a minute after the bottle is
+  set down. Over 3 700 consecutive samples in one day's log, 3 652 of them moved by 10 raw
+  units or less; the 34 that moved by more than 300 were all the bottle being handled.
 * **Scale**: about **1.4–1.6 raw units per mL** on the 21 oz PRO 2, in line with the PRO
   v1's 1.3. Two independent derivations from the bottle's own sip records agree: the
   captured frame below is 323 raw for 36% of 621 mL = 1.44, and the observed 9.5–10.5 raw
@@ -111,9 +114,20 @@ Behavioural notes on 100.64.0:
   the "empty" end was taken tilted or lifted, both of which read like empty) rather than
   as evidence that this generation's scale differs.
 * **The sensor weighs the water on the base, not the bottle.** Pouring the bottle out or
-  tilting it reads like "empty" (≈ 24040), not far below it, and lifting the bottle level
-  changes little. Drink detection therefore cannot use a "lifted" floor and instead waits
-  for readings to settle for ~15 s.
+  tilting it reads like "empty" (≈ 24040), not far below it.
+* **Lifting it, though, is a cliff.** Measured over a day of the 21 oz PRO 2, picking the
+  bottle up drops the reading by **700–1 600 raw units in a single sample** — 500 to
+  1 130 mL, which is up to nearly twice what the bottle holds — and setting it down puts
+  back the same amount within seconds to a couple of minutes. The displacement is not
+  constant: it grows with what's in the bottle, and it depends on the grip (lifting the
+  whole bottle off the table read 1 584 units; picking the same full bottle up by its lid
+  read 1 065). So a lifted bottle does *not* reliably read below empty, and the reading it
+  does give is steady enough to pass any settling filter — a bottle held in a hand looks
+  exactly like a bottle at rest, several hundred millilitres lower. What tells them apart
+  is that it arrived in one step, that no amount of drinking can move more water than the
+  bottle holds, and that it comes back.
+* Drink detection therefore cannot rely on a "lifted" floor alone; see **Picking the
+  bottle up** in the README for the three rules it uses instead.
 * **Slow drift at rest**, and it is creep after a change in load rather than a constant
   bias. Measured across one morning's session log on an untouched bottle, it decayed
   monotonically — −9.5 mL/min, −8.7, −5.8, −3.0 over fifty minutes, roughly halving every

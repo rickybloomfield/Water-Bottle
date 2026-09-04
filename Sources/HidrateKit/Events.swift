@@ -169,7 +169,8 @@ public struct SettledReading: Sendable, Hashable {
     /// One line for the session log. Only worth writing when something notable happened
     /// or could have: the rest are two-second heartbeats.
     public var logLine: String? {
-        guard isFirstOfSession || baselineBeforeML == nil || !plausible || recovered else { return nil }
+        guard isFirstOfSession || baselineBeforeML == nil || !plausible || recovered
+                || change?.isHandled == true else { return nil }
         let baseline = baselineBeforeML.map { String(Int($0.rounded())) } ?? "none"
         let outcome = change.map { String(describing: $0) } ?? "no change"
         var line = "settled raw=\(raw) level=\(Int(levelML.rounded()))mL baseline=\(baseline) → \(outcome)"

@@ -110,10 +110,14 @@ public enum LevelChange: Sendable, Hashable {
     case drink(volumeML: Double, fromML: Double, toML: Double)
     /// Water was added.
     case refill(volumeML: Double, fromML: Double, toML: Double)
+    /// The bottle moved, not the water: the reading either jumped further than the bottle
+    /// could possibly hold, or dropped and came straight back. Nothing to log, and the
+    /// baseline is held for when the bottle is set down again.
+    case handled(levelML: Double, deltaML: Double)
 
     public var volumeML: Double {
         switch self {
-        case .baseline: 0
+        case .baseline, .handled: 0
         case .drink(let v, _, _), .refill(let v, _, _): v
         }
     }
@@ -121,6 +125,8 @@ public enum LevelChange: Sendable, Hashable {
     public var isDrink: Bool { if case .drink = self { true } else { false } }
     public var isRefill: Bool { if case .refill = self { true } else { false } }
     public var isBaseline: Bool { if case .baseline = self { true } else { false } }
+    /// True when this reading was the bottle being picked up or set down.
+    public var isHandled: Bool { if case .handled = self { true } else { false } }
 }
 
 /// Drift compensation for the PRO 2 load cell, whose resting reading falls slowly after
@@ -172,16 +178,24 @@ public struct DriftModel: Sendable, Equatable, Codable {
 /// temperature, so absolute readings wander even when the water volume has not changed.
 /// The rules here are deliberately asymmetric to match physical reality:
 ///
+/// * **The bottle itself moving is not a level change.** No amount of drinking or filling
+///   can move more water than the bottle holds, so a reading that jumps further than that
+///   between two samples taken moments apart is the bottle being picked up or set down.
+///   The baseline is held, so setting it back down is a change of nothing.
 /// * **A drink is any decrease** past `minDrinkML`. Water leaving the bottle is the only
-///   thing that lowers the true level, so a real drop is trusted.
+///   thing that lowers the true level, so a real drop is trusted — but a drop of more than
+///   `confirmDrinkFractionOfCapacity` of the bottle has the same shape as a lift that was
+///   too gentle to exceed the rule above, so it is held until it has stayed down for
+///   `confirmSeconds`. A bottle that was only carried comes back long before that.
 /// * **An increase is ignored** unless it is unmistakably a refill: either a jump of at
-///   least `refillFractionOfCapacity` of the bottle, or the level reaching
-///   `nearFullFraction` of capacity (you top off to the brim). Small increases are surface
-///   or thermal noise and must never be logged as "water added".
-/// * **The baseline never inflates on a small change.** A small increase is dropped and the
-///   baseline held; a small decrease is adopted. So placing the bottle on a surface that
-///   reads a little high cannot quietly raise the recorded volume and inflate the next
-///   drink.
+///   least `refillFractionOfCapacity` of the bottle, or a rise from below
+///   `nearFullFraction` of capacity to above it (you top off to the brim). A bottle
+///   already at the fill line cannot be topped off, which is how the zero creeping upward
+///   stops reading as an endless series of small refills.
+/// * **The baseline follows drift but not steps.** A creeping change of a millilitre or
+///   two per reading is the load cell's zero wandering, so the baseline goes with it in
+///   both directions and the next drink is still measured correctly. A step up that isn't
+///   a refill is a different surface reading high, and is never adopted.
 ///
 /// Feed it settled readings (e.g. the output of `StableWeightFilter`).
 public struct LevelTracker: Sendable {
@@ -195,21 +209,50 @@ public struct LevelTracker: Sendable {
         public var nearFullFraction: Double
         /// Ignore any settled reading that maps below this level (bottle lifted or tilted).
         public var liftedBelowML: Double
+        /// A change of more than this fraction of the bottle is the bottle being picked up
+        /// or set down: nothing that happens to the water can move more than it holds.
+        /// A little over 1 so that filling a dry bottle to the brim still reads as a refill.
+        public var handlingFractionOfCapacity: Double
+        /// How recent the previous reading has to be for the step between the two to mean
+        /// anything. Over a disconnect the zero can wander by more than the bottle holds
+        /// without the bottle being touched at all.
+        public var handlingWindowSeconds: TimeInterval
+        /// A drop of at least this fraction of the bottle is held back until it proves
+        /// itself — see `confirmSeconds`.
+        public var confirmDrinkFractionOfCapacity: Double
+        /// How long a held drop has to stay down before it counts as a drink.
+        public var confirmSeconds: TimeInterval
+        /// An increase of less than this between two consecutive readings is the zero
+        /// creeping, and the baseline follows it; more than this arrived all at once and
+        /// is a surface reading high, which the baseline never adopts.
+        public var driftStepML: Double
 
         public init(
             minDrinkML: Double = 15,
             refillFractionOfCapacity: Double = 0.5,
             nearFullFraction: Double = 0.9,
-            liftedBelowML: Double = -60
+            liftedBelowML: Double = -60,
+            handlingFractionOfCapacity: Double = 1.05,
+            handlingWindowSeconds: TimeInterval = 120,
+            confirmDrinkFractionOfCapacity: Double = 0.5,
+            confirmSeconds: TimeInterval = 60,
+            driftStepML: Double = 20
         ) {
             self.minDrinkML = minDrinkML
             self.refillFractionOfCapacity = refillFractionOfCapacity
             self.nearFullFraction = nearFullFraction
             self.liftedBelowML = liftedBelowML
+            self.handlingFractionOfCapacity = handlingFractionOfCapacity
+            self.handlingWindowSeconds = handlingWindowSeconds
+            self.confirmDrinkFractionOfCapacity = confirmDrinkFractionOfCapacity
+            self.confirmSeconds = confirmSeconds
+            self.driftStepML = driftStepML
         }
 
         enum CodingKeys: String, CodingKey {
             case minDrinkML, refillFractionOfCapacity, nearFullFraction, liftedBelowML
+            case handlingFractionOfCapacity, handlingWindowSeconds
+            case confirmDrinkFractionOfCapacity, confirmSeconds, driftStepML
         }
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -218,6 +261,11 @@ public struct LevelTracker: Sendable {
             refillFractionOfCapacity = try c.decodeIfPresent(Double.self, forKey: .refillFractionOfCapacity) ?? d.refillFractionOfCapacity
             nearFullFraction = try c.decodeIfPresent(Double.self, forKey: .nearFullFraction) ?? d.nearFullFraction
             liftedBelowML = try c.decodeIfPresent(Double.self, forKey: .liftedBelowML) ?? d.liftedBelowML
+            handlingFractionOfCapacity = try c.decodeIfPresent(Double.self, forKey: .handlingFractionOfCapacity) ?? d.handlingFractionOfCapacity
+            handlingWindowSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .handlingWindowSeconds) ?? d.handlingWindowSeconds
+            confirmDrinkFractionOfCapacity = try c.decodeIfPresent(Double.self, forKey: .confirmDrinkFractionOfCapacity) ?? d.confirmDrinkFractionOfCapacity
+            confirmSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .confirmSeconds) ?? d.confirmSeconds
+            driftStepML = try c.decodeIfPresent(Double.self, forKey: .driftStepML) ?? d.driftStepML
         }
     }
 
@@ -226,6 +274,12 @@ public struct LevelTracker: Sendable {
     public var capacityML: Double
     /// The level the next change is measured against (best estimate of true current volume).
     public private(set) var baselineML: Double?
+    private var lastReading: (levelML: Double, date: Date)?
+    private var heldDrink: (fromML: Double, at: Date)?
+
+    /// When the drop currently being held back was first seen, if there is one. A drink
+    /// confirmed later belongs at this moment, not at the reading that confirmed it.
+    public var heldDrinkSince: Date? { heldDrink?.at }
 
     public init(configuration: Configuration = Configuration(), capacityML: Double = 621) {
         self.configuration = configuration
@@ -234,37 +288,163 @@ public struct LevelTracker: Sendable {
 
     @discardableResult
     public mutating func ingest(levelML: Double, at date: Date = Date()) -> LevelChange? {
+        let previous = lastReading
+        lastReading = (levelML: levelML, date: date)
+        let followsOnFrom = previous.map {
+            date.timeIntervalSince($0.date) <= configuration.handlingWindowSeconds
+        } ?? false
+
+        // Further than the bottle could hold, moments after the last reading: the bottle
+        // was picked up or set down. Water cannot do this, so the baseline stays where it
+        // is and setting the bottle back down is a change of nothing.
+        if let base = baselineML, followsOnFrom,
+           abs(levelML - base) > configuration.handlingFractionOfCapacity * capacityML {
+            return .handled(levelML: levelML, deltaML: levelML - base)
+        }
+
         // A reading well below empty means the bottle is lifted or tilted, not that it was
         // drained. Ignore it entirely so it can't register as a giant drink.
         if levelML < configuration.liftedBelowML { return nil }
 
-        guard let base = baselineML else {
+        guard var base = baselineML else {
             baselineML = levelML
             return .baseline(levelML: levelML)
         }
+
+        // A drop big enough to have been a lift is held until it proves itself.
+        if let held = heldDrink {
+            if levelML >= held.fromML - configuration.minDrinkML {
+                // Back where it started: the bottle was moved, not drunk from. The next
+                // reading measures against the level it had before it was picked up.
+                heldDrink = nil
+                baselineML = held.fromML
+                return .handled(levelML: levelML, deltaML: levelML - held.fromML)
+            }
+            if date.timeIntervalSince(held.at) >= configuration.confirmSeconds {
+                heldDrink = nil
+                baselineML = levelML
+                return .drink(volumeML: held.fromML - levelML, fromML: held.fromML, toML: levelML)
+            }
+            return nil // still down, still unproven
+        }
+
         let delta = levelML - base
 
         // A drink: any trusted decrease.
         if delta <= -configuration.minDrinkML {
+            if -delta >= configuration.confirmDrinkFractionOfCapacity * capacityML {
+                // Half a bottleful in one step is also what picking the bottle up looks
+                // like when the grip leaves some of the weight on the sensor. Hold it.
+                heldDrink = (fromML: base, at: date)
+                return nil
+            }
             baselineML = levelML
             return .drink(volumeML: -delta, fromML: base, toML: levelML)
         }
 
-        // A refill: a large jump up, or topping off to near-full.
+        // A refill: a large jump up, or topping off from below the fill line to the brim.
+        // A bottle already at the fill line cannot be topped off, which is what keeps the
+        // zero creeping upward from reading as an endless series of small refills.
+        let fillLine = configuration.nearFullFraction * capacityML
         let bigJump = delta >= configuration.refillFractionOfCapacity * capacityML
-        let toppedOff = levelML >= configuration.nearFullFraction * capacityML && delta >= configuration.minDrinkML
+        let toppedOff = base < fillLine && levelML >= fillLine && delta >= configuration.minDrinkML
         if bigJump || toppedOff {
             baselineML = levelML
             return .refill(volumeML: delta, fromML: base, toML: levelML)
         }
 
-        // Small change: never inflate the baseline. Adopt a small decrease (drift or a
-        // sub-threshold sip); drop a small increase (surface/thermal noise).
-        if levelML < base { baselineML = levelML }
+        // Small change: adopt drift, in either direction, so that the next drink is still
+        // measured from where the bottle really sits. An increase that arrives all at once
+        // is a different surface reading high rather than the zero creeping, and is never
+        // adopted — otherwise it would quietly inflate the volume of the next drink.
+        let crept = (previous.map { levelML - $0.levelML } ?? delta) < configuration.driftStepML
+        if levelML < base || crept { base = levelML }
+        baselineML = base
         return nil
     }
 
     public mutating func reset(baselineML: Double? = nil) {
         self.baselineML = baselineML
+        lastReading = nil
+        heldDrink = nil
+    }
+
+    /// Forget a drop that was waiting to prove itself, keeping the level it started from.
+    ///
+    /// Called when the connection drops: the bottle is about to be away for a quarter of
+    /// an hour, and the saved level it was measured against is what cross-disconnect
+    /// recovery compares the next reading with. Left in place, the drink would be
+    /// recovered there and confirmed here, and counted twice.
+    public mutating func forgetHeldDrink() {
+        heldDrink = nil
+    }
+}
+
+/// Decides when a run of readings below empty means the zero has moved rather than the
+/// water — and, just as importantly, when it doesn't.
+///
+/// A bottle cannot hold less than nothing, so settled readings that stay below empty mean
+/// the load cell's zero has crept and every one of those readings is being thrown away as
+/// "lifted". Moving the zero back is the fix. But a bottle held in a hand also reads below
+/// empty, holds still, and does it for as long as you carry it — and re-zeroing onto one
+/// is far worse than not re-zeroing at all, because it moves the zero by the weight of the
+/// whole bottle and every reading afterwards is wrong by that much.
+///
+/// The two are told apart by how the reading got there. Drift creeps: a millilitre or two
+/// per reading, so the run begins with a step no bigger than any other. Picking the bottle
+/// up is a cliff — hundreds of millilitres between two readings fifteen seconds apart, and
+/// no drink can do the same, since a bottle already reading near empty has nothing like
+/// that left to give.
+public struct ZeroDriftWatcher: Sendable {
+    /// A settled reading this far below empty means the zero has drifted. Nil to never
+    /// move the zero on its own.
+    public var belowML: Double?
+    /// How many readings in a row, over how long, before believing it.
+    public var samples: Int
+    public var minimumSeconds: TimeInterval
+    /// A drop of at least this much into the run means the bottle was picked up.
+    public var maxStepML: Double
+    /// How recent the previous reading has to be for the step to mean anything.
+    public var stepWindowSeconds: TimeInterval
+
+    private var streak = 0
+    private var since: Date?
+    private var beganWithAStep = false
+
+    public init(belowML: Double? = -25, samples: Int = 3, minimumSeconds: TimeInterval = 45,
+                maxStepML: Double = 100, stepWindowSeconds: TimeInterval = 120) {
+        self.belowML = belowML
+        self.samples = samples
+        self.minimumSeconds = minimumSeconds
+        self.maxStepML = maxStepML
+        self.stepWindowSeconds = stepWindowSeconds
+    }
+
+    /// Feed every settled reading the tracker made nothing of. True means move the zero
+    /// to this reading.
+    public mutating func shouldRezero(levelML: Double, at date: Date,
+                                      after previous: (levelML: Double, date: Date)?) -> Bool {
+        guard let belowML else { return false }
+        guard levelML < belowML else {
+            reset()
+            return false
+        }
+        if streak == 0, let previous, date.timeIntervalSince(previous.date) <= stepWindowSeconds,
+           previous.levelML - levelML >= maxStepML {
+            beganWithAStep = true
+        }
+        streak += 1
+        let since = since ?? date
+        self.since = since
+        guard !beganWithAStep, streak >= samples,
+              date.timeIntervalSince(since) >= minimumSeconds else { return false }
+        reset()
+        return true
+    }
+
+    public mutating func reset() {
+        streak = 0
+        since = nil
+        beganWithAStep = false
     }
 }

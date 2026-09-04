@@ -29,6 +29,12 @@ struct DebugView: View {
                 Stepper(value: config.nearFullFraction, in: 0.7...1.0, step: 0.05) {
                     LabeledContent("Refill if filled to", value: "\(Int(config.wrappedValue.nearFullFraction * 100))%")
                 }
+                Stepper(value: config.confirmDrinkFractionOfCapacity, in: 0.2...1.0, step: 0.05) {
+                    LabeledContent("Hold a drop over", value: "\(Int(config.wrappedValue.confirmDrinkFractionOfCapacity * 100))% of bottle")
+                }
+                Stepper(value: config.confirmSeconds, in: 15...300, step: 15) {
+                    LabeledContent("Hold it for", value: "\(Int(config.wrappedValue.confirmSeconds))s")
+                }
                 Stepper(value: Binding(get: { app.model.stabilitySamples }, set: { app.model.stabilitySamples = $0 }), in: 1...10) {
                     LabeledContent("Stable samples", value: "\(app.model.stabilitySamples)")
                 }
@@ -39,7 +45,7 @@ struct DebugView: View {
             } header: {
                 Text("Drink detection")
             } footer: {
-                Text("A drink is any decrease past the minimum. An increase only counts as a refill if it jumps by the refill fraction or reaches the fill line.")
+                Text("A drink is any decrease past the minimum, but a drop of more than the bottle holds is the bottle being picked up, and a drop past the hold fraction waits to see whether it comes back. An increase only counts as a refill if it jumps by the refill fraction or rises past the fill line.")
             }
 
             Section("Protocol") {

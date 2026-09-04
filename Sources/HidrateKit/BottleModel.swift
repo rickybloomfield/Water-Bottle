@@ -71,10 +71,22 @@ public final class HidrateBottleModel {
 
     /// A settled reading this far below empty means the zero has drifted, not that the
     /// bottle is holding negative water. Set to nil to leave the zero alone.
-    public var autoRezeroBelowML: Double? = -25
+    public var autoRezeroBelowML: Double? {
+        get { zeroDrift.belowML }
+        set { zeroDrift.belowML = newValue }
+    }
     /// How many settled readings in a row, over how long, before believing it.
-    public var autoRezeroSamples = 3
-    public var autoRezeroMinimumSeconds: TimeInterval = 45
+    public var autoRezeroSamples: Int {
+        get { zeroDrift.samples }
+        set { zeroDrift.samples = newValue }
+    }
+    public var autoRezeroMinimumSeconds: TimeInterval {
+        get { zeroDrift.minimumSeconds }
+        set { zeroDrift.minimumSeconds = newValue }
+    }
+    /// How long an automatic re-zero can still be taken back by the bottle proving it was
+    /// in the air when the zero was moved.
+    public var autoRezeroUndoWindow: TimeInterval = 600
     /// Called on the main actor for every sip record the bottle reports.
     public var onSip: (@MainActor (SipRecord) -> Void)?
     /// Called on the main actor for every raw event, before the model processes it.
@@ -103,6 +115,7 @@ public final class HidrateBottleModel {
             believedLevelML = nil
             store?.saveBelievedLevelML(nil)
             pendingRecoveryCheck = false
+            supersededByAutoRezero = nil
         }
     }
 
@@ -140,6 +153,7 @@ public final class HidrateBottleModel {
     public func rezero(toRaw raw: Int, automatic: Bool) -> Double? {
         guard let calibration = storedCalibration, calibration.isValid else { return nil }
         let shift = calibration.milliliters(forRaw: Double(raw))
+        supersededByAutoRezero = automatic ? (calibration: calibration, date: Date()) : nil
         // Not through the setter: this keeps the scale, so it isn't a new calibration and
         // must not throw away the level the tracker is measuring against.
         storedCalibration = calibration.rezeroed(toEmptyRaw: Double(raw))
@@ -152,8 +166,7 @@ public final class HidrateBottleModel {
         store?.saveLastRaw(raw, date: Date())
         believedLevelML = 0
         store?.saveBelievedLevelML(0)
-        belowEmptyStreak = 0
-        belowEmptySince = nil
+        zeroDrift.reset()
         pendingRecoveryCheck = false
         onZeroMoved?(shift, automatic)
         return shift
@@ -202,8 +215,11 @@ public final class HidrateBottleModel {
     /// True until the first settled reading of a session, which is the one that has to
     /// account for anything drunk while the bottle was away.
     private var awaitingFirstSettledReading = false
-    private var belowEmptyStreak = 0
-    private var belowEmptySince: Date?
+    private var zeroDrift = ZeroDriftWatcher()
+    private var lastSettled: (levelML: Double, date: Date)?
+    /// What an automatic re-zero replaced, kept for as long as it could still be
+    /// contradicted by the bottle being set back down.
+    private var supersededByAutoRezero: (calibration: BottleCalibration, date: Date)?
     private var stableSubscribers: [UUID: AsyncStream<Int>.Continuation] = [:]
     private var eventTask: Task<Void, Never>?
     private let store: CalibrationStore?
@@ -256,6 +272,16 @@ public final class HidrateBottleModel {
     public var zeroDriftML: Double? {
         guard let level = currentLevelML, level < 0 else { return nil }
         return -level
+    }
+
+    /// How far above capacity the reading sits, when it does. The bottle cannot hold more
+    /// than it holds, so this is the same stale zero as `zeroDriftML`, crept the other
+    /// way. The app can't correct it on its own — a zero is captured from an empty bottle,
+    /// and a full one has nothing to say about where empty is — so it says so instead.
+    public var overFullML: Double? {
+        guard let level = currentLevelML, let capacity = calibration?.capacityML,
+              capacity > 0, level > capacity else { return nil }
+        return level - capacity
     }
 
     public var fillFraction: Double? {
@@ -413,6 +439,8 @@ public final class HidrateBottleModel {
             }
             if !state.isConnected {
                 filter.reset()
+                tracker.forgetHeldDrink()
+                lastSettled = nil
                 stableStreak = 0
                 capState = nil
                 gatt = nil
@@ -466,13 +494,28 @@ public final class HidrateBottleModel {
             recovered = recoverAcrossGap(currentLevelML: baselineBefore ?? levelML, at: date)
         }
 
+        let previousSettled = lastSettled
+        lastSettled = (levelML: levelML, date: date)
+        // A drop held back until it proved itself belongs at the moment it happened, not
+        // at the reading a minute later that confirmed it.
+        let heldSince = tracker.heldDrinkSince
         let change = tracker.ingest(levelML: levelML, at: date)
+        let happenedAt = change?.isDrink == true ? (heldSince ?? date) : date
         let wasFirst = awaitingFirstSettledReading
         awaitingFirstSettledReading = false
         onSettledReading?(SettledReading(
             date: date, raw: raw, levelML: levelML, baselineBeforeML: baselineBefore,
             change: change, recovered: recovered, plausible: plausible, isFirstOfSession: wasFirst
         ))
+        // The bottle coming back up by more than it can hold, moments after the zero was
+        // moved on its own, means the zero was moved onto a bottle that was in the air.
+        if case .handled(_, let deltaML)? = change, deltaML > 0, undoAutoRezeroIfContradicted() {
+            // Everything else this reading says was said through a calibration that has
+            // just been thrown away. The raw value means the same under either.
+            rememberedRaw = raw
+            store?.saveLastRaw(raw, date: date)
+            return
+        }
 
         // Saved whatever the reading says. A bottle whose zero has drifted reads below
         // empty on every sample, and gating this on plausibility left nothing to draw at
@@ -492,12 +535,12 @@ public final class HidrateBottleModel {
         // Only ever after the tracker has had the reading, and only when the tracker made
         // nothing of it. Drift is what this is for; a drink is also a drop below empty
         // when the bottle was already near empty, and re-zeroing on that would swallow it.
-        if change == nil { considerRezero(levelML: levelML, raw: raw, at: date) }
+        if change == nil { considerRezero(levelML: levelML, raw: raw, at: date, after: previousSettled) }
 
         applyToBelievedLevel(change, measuredLevelML: levelML)
 
-        guard let change, !change.isBaseline else { return }
-        let event = LevelChangeEvent(id: UUID(), date: date, change: change, stableRaw: raw)
+        guard let change, !change.isBaseline, !change.isHandled else { return }
+        let event = LevelChangeEvent(id: UUID(), date: happenedAt, change: change, stableRaw: raw)
         levelChanges.insert(event, at: 0)
         onLevelChange?(event)
     }
@@ -519,6 +562,9 @@ public final class HidrateBottleModel {
             } else {
                 believedLevelML = min((believedLevelML ?? measuredLevelML) + volumeML, capacity)
             }
+        case .handled:
+            // The bottle was picked up or set down. Nothing left it and nothing went in.
+            return
         case .baseline where believedLevelML == nil:
             // Nothing to carry forward yet; start from the scale, wrong as it may be.
             believedLevelML = min(max(measuredLevelML, 0), capacity)
@@ -528,19 +574,33 @@ public final class HidrateBottleModel {
         store?.saveBelievedLevelML(believedLevelML)
     }
 
-    private func considerRezero(levelML: Double, raw: Int, at date: Date) {
-        guard let threshold = autoRezeroBelowML else { return }
-        guard levelML < threshold else {
-            belowEmptyStreak = 0
-            belowEmptySince = nil
-            return
-        }
-        belowEmptyStreak += 1
-        let since = belowEmptySince ?? date
-        belowEmptySince = since
-        guard belowEmptyStreak >= autoRezeroSamples,
-              date.timeIntervalSince(since) >= autoRezeroMinimumSeconds else { return }
+    private func considerRezero(levelML: Double, raw: Int, at date: Date,
+                                after previous: (levelML: Double, date: Date)?) {
+        guard zeroDrift.shouldRezero(levelML: levelML, at: date, after: previous) else { return }
         rezero(toRaw: raw, automatic: true)
+    }
+
+    /// Put back the zero an automatic re-zero replaced, when the bottle has just proved
+    /// it was in the air at the time by coming back up by more than it can hold.
+    @discardableResult
+    private func undoAutoRezeroIfContradicted() -> Bool {
+        guard let superseded = supersededByAutoRezero else { return false }
+        supersededByAutoRezero = nil
+        guard Date().timeIntervalSince(superseded.date) <= autoRezeroUndoWindow,
+              let current = storedCalibration else { return false }
+        let shift = current.milliliters(forRaw: superseded.calibration.emptyRaw)
+        storedCalibration = superseded.calibration
+        store?.saveCalibration(superseded.calibration)
+        tracker.reset()
+        store?.saveBaselineML(nil)
+        // Both of these were written through the zero that has just been thrown away, and
+        // cross-disconnect recovery would read the saved level back as a drink.
+        store?.clearLastLevel()
+        believedLevelML = nil
+        store?.saveBelievedLevelML(nil)
+        zeroDrift.reset()
+        onZeroMoved?(shift, true)
+        return true
     }
 
     /// Returns true when it logged a recovered drink.

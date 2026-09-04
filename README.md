@@ -133,11 +133,61 @@ So the app stops treating a full calibration as the fix for drift:
   zero has moved; the app moves it back and logs that it did. Before this, every one of
   those readings was discarded as "bottle lifted" and nothing was logged at all — one real
   session sat at −675 mL, tracking nothing, for over an hour.
+* **Unless it stepped there.** A bottle held in a hand also reads below empty, also holds
+  still, and does it for as long as you carry it. It is told apart by how it arrived:
+  drift creeps a millilitre or two per reading, while picking the bottle up is a cliff of
+  several hundred in one fifteen-second step, and no drink can match it — a bottle already
+  reading near empty has nothing like that left to give. See below for what happens when
+  this rule isn't there.
 
 The trade: if the bottle drifts down far enough while it still holds water, the automatic
 re-zero will call that empty and the displayed level will be wrong until the next refill.
 Intake is unaffected — the tracker measures differences, and a drink after a re-zero still
 reads as a drink — and being wrong about the level beats discarding every reading.
+
+The zero also creeps *upward*, and there is no matching fix: a zero is captured from an
+empty bottle, and one with water in it has nothing to say about where empty sits. So when
+the scale reads more than the bottle can hold, the Bottle tab says so and asks for the one
+thing that settles it — an empty bottle and the button above.
+
+## Picking the bottle up
+
+Nothing the water does can move more of it than the bottle holds, so a reading that moves
+further than that between two readings taken seconds apart is the bottle itself being
+picked up or set down. The tracker calls that *handled*: no drink, no refill, and the
+baseline is held where it was so that setting the bottle back down is a change of nothing.
+
+That one rule is the whole of it for a full bottle, whose lift displaces more than a
+bottleful. A nearly empty one displaces less, but lands far below empty, where the older
+lifted-reading rule has it. What falls between the two is a drop of half a bottle or so
+that still looks plausible — and those are held back and only logged once they have stayed
+down for a minute. A bottle that was only carried comes back long before that; water that
+was drunk never does. Ordinary sips are logged the moment they are seen, as before: it is
+only drops past half the bottle that wait, and they are rare.
+
+The one thing that shape cannot separate is drinking half the bottle and refilling it to
+the same level inside that minute, which is a lift as far as the scale is concerned; that
+drink is dropped and has to be logged by hand. It is the right way round to be wrong. A
+missed drink is visible and can be added; an invented one is written to Apple Health
+without anyone being asked.
+
+This is worth the machinery because of what one lift did on 4 September. The bottle was
+picked up at 13:28 and held for two and a half minutes; every reading came back 1 117 mL
+below where it had been resting, which is the weight of the bottle and its water and not a
+possible amount of drinking. The old code discarded each of those readings as "lifted" and
+then handed the same readings to the automatic re-zero, which found three of them, 45
+seconds apart, below empty — and moved the zero onto a bottle that was in the air.
+
+From that moment the scale read about 1 100 mL in a 621 mL bottle. Every reading was wrong
+by the weight of the bottle, and nothing said so. Being permanently past the fill line,
+each 15 mL of ordinary upward creep counted as topping the bottle off, ratcheting the
+baseline from 804 mL to 1 209 mL over the afternoon. And the next two lifts — the bottle
+picked up by its lid, at 17:17 and 17:22 — measured drops of 737 mL and 735 mL against
+that baseline, which the app logged as drinks and wrote to Apple Health as 24.9 oz each.
+
+Replaying that session log through the rules above produces neither the re-zero nor either
+drink, and leaves every real drink of the previous two days standing. Three more phantoms
+of the same shape (531 mL, 598 mL, 763 mL) and a second corrupting re-zero go with them.
 
 ## The level the app shows
 

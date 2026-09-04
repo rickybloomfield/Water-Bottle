@@ -93,6 +93,15 @@ struct BottleTabView: View {
                             .font(.footnote)
                             .foregroundStyle(.orange)
                     }
+                    if let over = model.overFullML, over > 20 {
+                        // The same stale zero, crept upward. Nothing can be done about it
+                        // from a bottle with water in it, so ask for the one thing that
+                        // fixes it: an empty bottle and the button below.
+                        Label("Reading \(app.volume(over)) more than the bottle holds — the zero has drifted. Empty it and set the zero.",
+                              systemImage: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                    }
                     rezeroButton
                 } else {
                     Label("Waiting for a steady reading. Set the bottle on a flat surface.", systemImage: "hourglass")
