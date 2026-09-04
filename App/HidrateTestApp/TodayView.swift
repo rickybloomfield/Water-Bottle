@@ -273,5 +273,8 @@ struct TodayView: View {
             }
         }
         .presentationDetents([.medium, .large])
+        // As on the edit sheet: pinned so dragging between heights doesn't swap the
+        // sheet from translucent to opaque partway through.
+        .presentationBackground(.regularMaterial)
     }
 }

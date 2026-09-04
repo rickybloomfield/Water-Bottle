@@ -8,23 +8,44 @@ struct VolumePresetGrid: View {
     var selected: Double?
     var onPick: (Double) -> Void
 
+    /// Rows of three, built up front. A lazy grid inside a Form rebuilds its cells as the
+    /// sheet is dragged between detents, which the buttons show as a flicker; there are
+    /// six of them, so there is nothing to be lazy about.
+    private var rows: [[Double]] {
+        stride(from: 0, to: unit.presetsML.count, by: 3).map {
+            Array(unit.presetsML[$0..<min($0 + 3, unit.presetsML.count)])
+        }
+    }
+
     var body: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 10) {
-            ForEach(unit.presetsML, id: \.self) { ml in
-                let isSelected = selected.map { abs($0 - ml) < 0.5 } ?? false
-                Button {
-                    onPick(ml)
-                } label: {
-                    Text(unit.format(ml))
-                        .font(.body.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
+        VStack(spacing: 10) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 10) {
+                    ForEach(row, id: \.self) { ml in button(ml) }
                 }
-                .buttonStyle(.bordered)
-                .tint(isSelected ? .blue : nil)
             }
         }
         .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
+    }
+
+    /// Drawn rather than styled with `.bordered`, so selecting one changes only its
+    /// colours — the view itself stays put and the change can animate.
+    private func button(_ ml: Double) -> some View {
+        let isSelected = selected.map { abs($0 - ml) < 0.5 } ?? false
+        return Button {
+            onPick(ml)
+        } label: {
+            Text(unit.format(ml))
+                .font(.body.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .background(isSelected ? Color.accentColor : Color.accentColor.opacity(0.14),
+                            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .foregroundStyle(isSelected ? Color.white : Color.accentColor)
+        }
+        .buttonStyle(.plain)
+        .animation(.easeInOut(duration: 0.15), value: isSelected)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 }
 
@@ -91,6 +112,9 @@ struct EditDrinkView: View {
             }
         }
         .presentationDetents([.medium, .large])
+        // Pinned, so dragging between the two heights doesn't swap the sheet from
+        // translucent to opaque halfway through the drag.
+        .presentationBackground(.regularMaterial)
     }
 
     private var hasChanges: Bool {
