@@ -1,28 +1,28 @@
+import simd
 import SwiftUI
 
-/// A bottle silhouette with live water inside. The water surface always lies
-/// perpendicular to gravity, so turning the phone on its side pools the water against
-/// that side and turning it upside down puts the water against the cap. Volume is
-/// preserved at every angle. The surface undulates at rest, sloshes as the phone
-/// rotates, ripples when tapped, and drains smoothly when the level drops.
-/// Pass `nil` for an unknown level to show an empty dashed outline.
+/// A bottle silhouette holding a simulated liquid. The water is a real 2D fluid
+/// (position-based, incompressible) under the device's actual gravity vector, so it
+/// pools, sloshes, and splashes the way water does when you tilt, turn, or tap the
+/// phone. Pass `nil` for an unknown level to show an empty dashed outline.
 struct BottleWaterView: View {
     var fillFraction: Double?
     var tint: Color = .blue
 
-    @State private var model = WaveMotionModel()
-    @State private var solver = WaterLevelSolver()
+    @State private var model = FluidModel()
     @State private var isVisible = false
     @State private var lastSize: CGSize = .zero
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
 
-    private var animating: Bool { isVisible && !reduceMotion && scenePhase == .active }
+    private var animating: Bool {
+        isVisible && scenePhase == .active && !(reduceMotion && model.isSettled)
+    }
 
     var body: some View {
         TimelineView(.animation(paused: !animating)) { context in
-            Canvas { graphics, size in
+            Canvas(rendersAsynchronously: false) { graphics, size in
                 draw(into: &graphics, size: size, date: context.date)
             }
         }
@@ -30,90 +30,55 @@ struct BottleWaterView: View {
         .onGeometryChange(for: CGSize.self) { $0.size } action: { lastSize = $0 }
         .onTapGesture(coordinateSpace: .local) { location in
             guard animating, fillFraction != nil else { return }
-            let geo = BottleGeometry(size: lastSize)
-            // Map the tap into the water's own (gravity-aligned) frame.
-            let c = geo.center
-            let phi = model.displayedAngle
-            let x = location.x - c.x, y = location.y - c.y
-            let xPrime = x * cos(phi) - y * sin(phi)
-            let span = geo.reach
-            model.poke(atFraction: (xPrime + span) / (2 * span))
+            model.splash(at: location)
         }
         .onAppear {
             isVisible = true
-            model.setTargetFill(fillFraction ?? 0, animated: false)
-            model.setMotionActive(animating)
+            model.setTargetFill(fillFraction ?? 0)
+            model.setMotionActive(animating && !reduceMotion)
         }
         .onDisappear {
             isVisible = false
             model.setMotionActive(false)
         }
-        .onChange(of: fillFraction) { _, new in model.setTargetFill(new ?? 0, animated: true) }
-        .onChange(of: animating) { _, now in model.setMotionActive(now) }
+        .onChange(of: fillFraction) { _, new in model.setTargetFill(new ?? 0) }
+        .onChange(of: animating) { _, now in model.setMotionActive(now && !reduceMotion) }
         .accessibilityLabel("Water bottle")
         .accessibilityValue(fillFraction.map { "\(Int($0 * 100)) percent full" } ?? "Level unknown")
     }
 
-    // MARK: - Drawing
-
     private func draw(into g: inout GraphicsContext, size: CGSize, date: Date) {
         let geo = BottleGeometry(size: size)
-        model.lastWidth = geo.reach * 2
-        model.advance(to: date, animating: animating)
-        solver.prepare(for: geo)
+        model.prepare(geo: geo)
+        model.advance(to: date, animating: animating, reduceMotion: reduceMotion)
 
         let outline: Color = colorScheme == .dark ? .white.opacity(0.55) : Color.primary.opacity(0.35)
         let glass: Color = colorScheme == .dark ? .white.opacity(0.06) : Color.primary.opacity(0.035)
         g.fill(geo.silhouette, with: .color(glass))
 
-        if fillFraction != nil {
-            let fill = model.displayedFill
-            let phi = animating ? model.displayedAngle : 0
-            if fill > 0.002, let level = solver.level(forFill: fill, angle: phi) {
-                var w = g
-                w.clip(to: geo.silhouette)
-
-                // Glass highlight stays with the bottle (unrotated).
-                let highlight = Path(roundedRect: CGRect(x: geo.body.minX + geo.w * 0.10, y: geo.body.minY + geo.h * 0.12,
-                                                         width: geo.w * 0.07, height: geo.body.height * 0.55),
-                                     cornerRadius: geo.w * 0.035)
-
-                // Work in the water's frame: origin at the bottle centre, +y = down along gravity.
-                w.translateBy(x: geo.center.x, y: geo.center.y)
-                w.rotate(by: .radians(-phi))
-
-                let span = geo.reach
-                func surfaceY(atX x: CGFloat) -> CGFloat {
-                    let frac = (x + span) / (2 * span)
-                    let offset = animating ? model.simulation.height(atFraction: frac) : 0
-                    return level - CGFloat(offset)
+        if fillFraction != nil, let sim = model.sim, sim.count > 0 {
+            var w = g
+            w.clip(to: geo.silhouette)
+            // Metaballs: blur the particle discs, then threshold the alpha into one smooth
+            // liquid body. Order matters: the threshold is applied after the blur.
+            w.addFilter(.alphaThreshold(min: 0.45, color: tint))
+            w.addFilter(.blur(radius: Double(sim.spacing) * 0.85))
+            let r = CGFloat(sim.spacing) * 0.78
+            let positions = sim.positions
+            w.drawLayer { layer in
+                for i in 0..<sim.count {
+                    let p = positions[i]
+                    layer.fill(Path(ellipseIn: CGRect(x: CGFloat(p.x) - r, y: CGFloat(p.y) - r, width: r * 2, height: r * 2)),
+                               with: .color(.black))
                 }
-                var water = Path()
-                var crest = Path()
-                water.move(to: CGPoint(x: -span, y: span * 2))
-                water.addLine(to: CGPoint(x: -span, y: surfaceY(atX: -span)))
-                crest.move(to: CGPoint(x: -span, y: surfaceY(atX: -span)))
-                var x = -span
-                while x < span {
-                    x = min(x + 3, span)
-                    let pt = CGPoint(x: x, y: surfaceY(atX: x))
-                    water.addLine(to: pt)
-                    crest.addLine(to: pt)
-                }
-                water.addLine(to: CGPoint(x: span, y: span * 2))
-                water.closeSubpath()
-
-                let gradient = Gradient(colors: [tint.opacity(0.95), tint.opacity(0.72)])
-                w.fill(water, with: .linearGradient(gradient,
-                                                   startPoint: CGPoint(x: 0, y: level),
-                                                   endPoint: CGPoint(x: 0, y: level + geo.body.height)))
-                w.stroke(crest, with: .color(.white.opacity(0.45)), lineWidth: 1.6)
-
-                // Undo the rotation for the highlight so it reads as glass, not water.
-                w.rotate(by: .radians(phi))
-                w.translateBy(x: -geo.center.x, y: -geo.center.y)
-                w.fill(highlight, with: .color(.white.opacity(0.16)))
             }
+            // Glass highlight over the liquid.
+            var hl = g
+            hl.clip(to: geo.silhouette)
+            let highlight = Path(roundedRect: CGRect(x: geo.body.minX + geo.w * 0.10, y: geo.body.minY + geo.h * 0.12,
+                                                     width: geo.w * 0.07, height: geo.body.height * 0.55),
+                                 cornerRadius: geo.w * 0.035)
+            hl.fill(highlight, with: .color(.white.opacity(0.16)))
         }
 
         if fillFraction == nil {
@@ -137,10 +102,8 @@ struct BottleGeometry {
     var neckLeft: CGFloat { (w - neckWidth) / 2 }
     var neckRight: CGFloat { neckLeft + neckWidth }
     var neckTop: CGFloat { h * 0.10 }
-    /// Centre of rotation for the water frame.
-    var center: CGPoint { CGPoint(x: w / 2, y: (neckTop + body.maxY) / 2) }
-    /// Half-extent that covers the whole bottle from the centre at any angle.
-    var reach: CGFloat { hypot(w, body.maxY - neckTop) / 2 + 4 }
+    /// Where a refill pours in from.
+    var pourPoint: CGPoint { CGPoint(x: w / 2, y: neckTop + h * 0.02) }
 
     var silhouette: Path {
         var p = Path()
@@ -169,54 +132,101 @@ struct BottleGeometry {
     }
 }
 
-/// Finds where the water surface must sit, for a given gravity direction, so the
-/// submerged area equals the fill fraction of the bottle. Samples the bottle's interior
-/// once per size, then per query projects those points onto gravity and takes a
-/// quantile. Results are cached so a still phone costs nothing per frame.
-@MainActor
-final class WaterLevelSolver {
-    private var sampledSize: CGSize = .zero
-    private var points: [CGPoint] = []   // interior points relative to the centre
-    private var cacheKey: (fill: Int, angle: Int) = (-1, -1)
-    private var cached: CGFloat?
+// MARK: - Model
 
-    func prepare(for geo: BottleGeometry) {
-        guard geo.size != sampledSize, geo.w > 0, geo.h > 0 else { return }
-        sampledSize = geo.size
-        cacheKey = (-1, -1)
-        let path = geo.silhouette
-        let c = geo.center
-        let step = max(2.5, geo.w / 36)
-        var pts: [CGPoint] = []
-        var y = geo.neckTop + step / 2
-        while y < geo.body.maxY {
-            var x = geo.body.minX + step / 2
-            while x < geo.body.maxX {
-                let p = CGPoint(x: x, y: y)
-                if path.contains(p) { pts.append(CGPoint(x: p.x - c.x, y: p.y - c.y)) }
-                x += step
-            }
-            y += step
-        }
-        points = pts
+/// Owns the fluid, its walls, and the clock. Converts the device's gravity into the
+/// simulation, keeps the particle count matched to the bottle's fill level, and pours or
+/// drains to follow changes. Held in @State; mutated during TimelineView rendering.
+@MainActor
+final class FluidModel {
+    private(set) var sim: FluidSimulation?
+    private(set) var isSettled = false
+
+    /// Real-world scale. The drawn interior stands in for a 20 cm tall bottle.
+    private let interiorHeightMeters: Float = 0.20
+    private var pointsPerMeter: Float = 1000
+    private var geoSize: CGSize = .zero
+    private var pourPoint = SIMD2<Float>.zero
+    private var capacitySites = 0
+    private var targetFill: Double = 0
+    private var gravityDir = SIMD2<Float>(0, 1)
+    private var lastDate: Date?
+    private var motionActive = false
+    private var settleClock: Double = 0
+
+    func prepare(geo: BottleGeometry) {
+        guard geo.size != geoSize, geo.w > 10, geo.h > 10 else { return }
+        geoSize = geo.size
+        let silhouette = geo.silhouette
+        let sdf = SignedDistanceField(
+            minX: Float(geo.body.minX), minY: Float(geo.neckTop), maxX: Float(geo.body.maxX), maxY: Float(geo.body.maxY),
+            cellSize: 2
+        ) { p in silhouette.contains(CGPoint(x: CGFloat(p.x), y: CGFloat(p.y))) }
+        pointsPerMeter = Float(geo.body.maxY - geo.neckTop) / interiorHeightMeters
+        let spacing = Float(geo.body.width) / 16.5
+        let s = FluidSimulation(sdf: sdf, spacing: spacing, capacity: 900, pointsPerMeter: pointsPerMeter)
+        capacitySites = s.capacityCount()
+        pourPoint = SIMD2(Float(geo.pourPoint.x), Float(geo.pourPoint.y))
+        s.fill(fraction: Float(targetFill), gravityDirection: gravityDir)
+        sim = s
+        lastDate = nil
     }
 
-    /// Distance along gravity (from the bottle centre) of the resting water surface.
-    func level(forFill fill: Double, angle: Double) -> CGFloat? {
-        guard !points.isEmpty else { return nil }
-        let key = (Int((fill * 500).rounded()), Int((angle * 200).rounded()))
-        if key == cacheKey, let cached { return cached }
-        let d = CGVector(dx: sin(angle), dy: cos(angle))
-        var s = points.map { $0.x * d.dx + $0.y * d.dy }
-        s.sort()
-        let n = s.count
-        let submerged = Int((fill * Double(n)).rounded())
-        let result: CGFloat
-        if submerged >= n { result = s[0] - 20 }            // full: cover everything
-        else if submerged <= 0 { result = s[n - 1] + 20 }   // empty
-        else { result = s[n - submerged] }                   // the lowest `fill` share is under water
-        cacheKey = key
-        cached = result
-        return result
+    func setTargetFill(_ fill: Double) {
+        targetFill = min(max(fill, 0), 1)
+        // First time we learn the level, place the water at rest rather than pouring it all in.
+        if let sim, sim.count == 0, targetFill > 0 {
+            sim.fill(fraction: Float(targetFill), gravityDirection: gravityDir)
+        }
+    }
+
+    func advance(to date: Date, animating: Bool, reduceMotion: Bool) {
+        guard let sim, animating else { lastDate = nil; return }
+        defer { lastDate = date }
+        guard let last = lastDate else { return }
+        let elapsed = min(max(date.timeIntervalSince(last), 0), 0.05)
+
+        // Gravity: the real vector, scaled to points. When the phone lies flat the
+        // in-plane component fades; keep a floor so the water never floats.
+        var g = SIMD2<Float>(0, 1)
+        if !reduceMotion {
+            let sg = MotionGravitySource.shared.screenGravity
+            g = SIMD2(Float(sg.dx), Float(sg.dy))
+        }
+        let mag = simd_length(g)
+        if mag > 0.15 { gravityDir = g / mag }
+        let strength = max(mag, 0.3)
+        let gravity = gravityDir * (9.81 * pointsPerMeter * strength)
+
+        // Follow the bottle's level: drain from the surface, or pour in from the neck.
+        let target = Int((targetFill * Double(capacitySites)).rounded())
+        if sim.count > target {
+            sim.removeFromSurface(min(3, sim.count - target), gravityDirection: gravityDir)
+        } else if sim.count < target {
+            sim.add(min(2, target - sim.count), at: pourPoint, velocity: gravityDir * (0.5 * pointsPerMeter))
+        }
+
+        // Many small substeps with few iterations keep a resting fluid still (see
+        // FluidSimulation). At 60 fps that's 8 substeps a frame.
+        let dt: Float = 1.0 / 480.0
+        let steps = min(10, max(1, Int((elapsed / Double(dt)).rounded())))
+        for _ in 0..<steps { sim.step(dt: dt, gravity: gravity) }
+
+        if reduceMotion {
+            settleClock += elapsed
+            isSettled = settleClock > 2
+        }
+    }
+
+    func splash(at point: CGPoint) {
+        guard let sim else { return }
+        let p = SIMD2(Float(point.x), Float(point.y))
+        sim.splash(at: p, radius: sim.h * 3, impulse: gravityDir * (0.9 * pointsPerMeter))
+    }
+
+    func setMotionActive(_ active: Bool) {
+        guard active != motionActive else { return }
+        motionActive = active
+        if active { MotionGravitySource.shared.acquire() } else { MotionGravitySource.shared.release() }
     }
 }

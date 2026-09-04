@@ -16,6 +16,17 @@ Talk to a HidrateSpark PRO water bottle directly over Bluetooth, without the off
 * **`docs/PROTOCOL.md`**: everything known about the BLE protocol.
   **`docs/FIRMWARE.md`**: what changing the firmware would actually take.
 
+## The water
+
+The bottle on the Today tab holds a real fluid simulation, not an animation: a 2D
+Position-Based Fluids solver (Macklin & Müller) with incompressibility enforced like water,
+driven by the device's actual gravity vector at 9.81 m/s² scaled to the bottle's real
+dimensions, and water-like viscosity. It pools against whichever wall is down, sloshes,
+splashes when tapped, and drains or pours as the level changes. The vessel walls come
+from a signed-distance field of the drawn silhouette, and the particles render as one
+liquid through a metaball filter. A headless harness (see `docs/PHYSICS.md`) checks
+containment, density error, surface flatness, and behaviour at 90° and 180°.
+
 ## Quick start (iOS app)
 
 ```bash

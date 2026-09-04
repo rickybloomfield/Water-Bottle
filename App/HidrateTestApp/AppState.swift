@@ -50,6 +50,13 @@ final class AppState {
     let model: HidrateBottleModel
     let health = HealthKitWaterLogger()
     let sessionLog = SessionLog()
+    /// Dev only: launch with `-demoFill 0.6` to show the bottle at a fixed level without a
+    /// connected bottle (used to check the fluid rendering in the Simulator).
+    let demoFillOverride: Double? = {
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-demoFill"), i + 1 < args.count { return Double(args[i + 1]) }
+        return nil
+    }()
 
     private(set) var entries: [IntakeEntry] = [] { didSet { saveEntries() } }
     var autoLogToHealth: Bool { didSet { defaults.set(autoLogToHealth, forKey: Keys.autoLog) } }

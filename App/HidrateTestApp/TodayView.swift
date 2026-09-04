@@ -75,6 +75,7 @@ struct TodayView: View {
     }
 
     private var bottleFill: Double? {
+        if let demo = app.demoFillOverride { return demo }
         if model.isConnected, let fill = model.fillFraction { return fill }
         return nil
     }

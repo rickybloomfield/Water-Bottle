@@ -43,6 +43,9 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rickybloomfield.HidrateTestApp
+        # The fluid simulation is CPU-bound; -Onone makes it 20-50x slower, so optimise
+        # even in Debug (DEBUG stays defined).
+        SWIFT_OPTIMIZATION_LEVEL: "-O"
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_STRICT_CONCURRENCY: complete
         MARKETING_VERSION: "0.1.0"
