@@ -3,7 +3,8 @@ import SwiftUI
 
 @main
 struct HidrateTestApp: App {
-    @State private var app = AppState()
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
+    @State private var app = AppState.shared
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -22,9 +23,16 @@ struct HidrateTestApp: App {
             .environment(app)
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
+            switch phase {
+            case .active:
                 app.model.client.nudgeReconnect()
-                Task { await app.refreshHealthTotal() }
+                // Drinks tapped in the widget, water logged elsewhere in Health.
+                Task { await app.catchUp() }
+            case .background:
+                // Leave a refresh queued so the widget and the watch keep moving.
+                AppDelegate.scheduleRefresh()
+            default:
+                break
             }
         }
     }

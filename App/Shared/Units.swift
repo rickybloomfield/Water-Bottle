@@ -1,9 +1,11 @@
 import Foundation
-import HidrateKit
 
 /// The user's preferred volume unit. Storage is always millilitres; this converts and
 /// formats at the edges.
-enum VolumeUnit: String, CaseIterable, Identifiable, Codable {
+///
+/// Shared by the app, the widget and the watch app, so it deliberately depends on
+/// nothing but Foundation.
+enum VolumeUnit: String, CaseIterable, Identifiable, Codable, Sendable {
     case ounces
     case milliliters
 
@@ -11,7 +13,9 @@ enum VolumeUnit: String, CaseIterable, Identifiable, Codable {
     var title: String { self == .ounces ? "Ounces" : "Millilitres" }
     var symbol: String { self == .ounces ? "oz" : "mL" }
 
-    static let mlPerOunce = BottleCalibration.millilitersPerUSFluidOunce
+    /// Matches `BottleCalibration.millilitersPerUSFluidOunce`; duplicated so the widget
+    /// and watch targets don't have to link HidrateKit.
+    static let mlPerOunce = 29.5735
 
     func value(fromML ml: Double) -> Double { self == .ounces ? ml / Self.mlPerOunce : ml }
     func ml(fromValue value: Double) -> Double { self == .ounces ? value * Self.mlPerOunce : value }
@@ -20,6 +24,14 @@ enum VolumeUnit: String, CaseIterable, Identifiable, Codable {
     var goalStepML: Double { self == .ounces ? Self.mlPerOunce * 4 : 100 }
     /// Sensible increment for a manual drink, in mL.
     var drinkStepML: Double { self == .ounces ? Self.mlPerOunce * 0.5 : 10 }
+
+    /// One-tap amounts, offered in the app's log sheet and on the watch.
+    var presetsML: [Double] {
+        self == .ounces
+            ? [4, 8, 12, 16.9, 21, 24].map { $0 * Self.mlPerOunce }
+            : [100, 250, 350, 500, 621, 710]
+    }
+
 
     /// "18 oz" / "532 mL". Ounces show one decimal only when small.
     func format(_ ml: Double, showUnit: Bool = true) -> String {
@@ -35,6 +47,6 @@ enum VolumeUnit: String, CaseIterable, Identifiable, Codable {
         return showUnit ? "\(number) \(symbol)" : number
     }
 
-    /// Just the number, for big hero displays.
+    /// Just the number, for big hero displays and the watch complication.
     func number(_ ml: Double) -> String { format(ml, showUnit: false) }
 }

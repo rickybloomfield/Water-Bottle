@@ -72,11 +72,17 @@ struct BottleTabView: View {
     private var levelSection: some View {
         Section("Water level") {
             if let calibration = model.calibration, calibration.isValid {
-                if let level = model.currentLevelML, let fraction = model.fillFraction {
+                if let level = model.clampedLevelML, let fraction = model.fillFraction {
                     Gauge(value: fraction) { Text("Fill") } currentValueLabel: { Text(app.volume(level)) }
                         .gaugeStyle(.accessoryLinear)
                     LabeledContent("In the bottle", value: app.volume(level))
                     LabeledContent("Fill", value: "\(Int((fraction * 100).rounded()))%")
+                    if let drift = model.zeroDriftML, drift > 0 {
+                        Label("Reading \(app.volume(drift)) below the empty point — the scale has drifted. Recalibrate empty to fix the level.",
+                              systemImage: "exclamationmark.triangle")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                    }
                 } else {
                     Label("Waiting for a steady reading. Set the bottle on a flat surface.", systemImage: "hourglass")
                         .foregroundStyle(.secondary)

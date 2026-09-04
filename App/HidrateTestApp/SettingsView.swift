@@ -96,7 +96,9 @@ struct SettingsView: View {
         } footer: {
             if app.reminders.enabled {
                 let n = app.reminders.fireTimes.count
-                Text(n > 0 ? "\(n) reminders a day, as notifications." : "Choose a window with at least one reminder in it.")
+                Text(n > 0
+                     ? "Up to \(n) a day, and only when you're behind: a reminder is skipped if you've already drunk what this window says you should have by then. The tick on the Today ring marks that pace."
+                     : "Choose a window with at least one reminder in it.")
             } else if !app.notificationsAuthorized {
                 Text("Turning this on asks for notification permission.")
             }

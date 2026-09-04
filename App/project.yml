@@ -3,6 +3,7 @@ options:
   bundleIdPrefix: com.rickybloomfield
   deploymentTarget:
     iOS: "17.0"
+    watchOS: "10.0"
   createIntermediateGroups: true
   xcodeVersion: "26.0"
 settings:
@@ -13,6 +14,8 @@ settings:
 packages:
   HidrateKit:
     path: ..
+# The widget, the watch app and the complication all read the same app group.
+appGroup: &appGroup group.com.rickybloomfield.HidrateTestApp
 targets:
   HidrateTestApp:
     type: application
@@ -20,30 +23,127 @@ targets:
     deploymentTarget: "17.0"
     sources:
       - path: HidrateTestApp
+      - path: Shared
+      - path: AppIcon.icon
+        type: file
+        buildPhase: resources
     dependencies:
       - package: HidrateKit
         product: HidrateKit
+      - target: HidrateWidgets
+        embed: true
+      - target: HidrateWatchApp
+        embed: true
+        copy:
+          destination: productsDirectory
+          subpath: "$(CONTENTS_FOLDER_PATH)/Watch"
     entitlements:
       path: HidrateTestApp/HidrateTestApp.entitlements
       properties:
         com.apple.developer.healthkit: true
         com.apple.developer.healthkit.access: []
+        com.apple.developer.healthkit.background-delivery: true
+        com.apple.security.application-groups: [*appGroup]
     info:
       path: HidrateTestApp/Info.plist
       properties:
-        CFBundleDisplayName: Hidrate Test
+        CFBundleDisplayName: Hydration
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSBluetoothAlwaysUsageDescription: Connects to your HidrateSpark bottle to read its water level and sips.
         NSHealthShareUsageDescription: Reads today's water intake so the app can show your total.
         NSHealthUpdateUsageDescription: Logs the water you drink from the bottle as water intake.
-        UIBackgroundModes: [bluetooth-central]
+        UIBackgroundModes: [bluetooth-central, fetch]
+        BGTaskSchedulerPermittedIdentifiers: [com.rickybloomfield.HidrateTestApp.refresh]
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rickybloomfield.HidrateTestApp
         TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_STRICT_CONCURRENCY: complete
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  HidrateWidgets:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: HidrateWidgets
+      - path: Shared
+    entitlements:
+      path: HidrateWidgets/HidrateWidgets.entitlements
+      properties:
+        com.apple.security.application-groups: [*appGroup]
+    info:
+      path: HidrateWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: Hydration
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rickybloomfield.HidrateTestApp.Widgets
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_STRICT_CONCURRENCY: complete
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+
+  HidrateWatchApp:
+    type: application
+    platform: watchOS
+    deploymentTarget: "10.0"
+    sources:
+      - path: HidrateWatchApp
+      - path: Shared
+      - path: AppIcon.icon
+        type: file
+        buildPhase: resources
+    dependencies:
+      - target: HidrateWatchWidgets
+        embed: true
+    entitlements:
+      path: HidrateWatchApp/HidrateWatchApp.entitlements
+      properties:
+        com.apple.security.application-groups: [*appGroup]
+    info:
+      path: HidrateWatchApp/Info.plist
+      properties:
+        CFBundleDisplayName: Hydration
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: com.rickybloomfield.HidrateTestApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rickybloomfield.HidrateTestApp.watchkitapp
+        TARGETED_DEVICE_FAMILY: "4"
+        SWIFT_STRICT_CONCURRENCY: complete
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+
+  HidrateWatchWidgets:
+    type: app-extension
+    platform: watchOS
+    deploymentTarget: "10.0"
+    sources:
+      - path: HidrateWatchWidgets
+      - path: Shared
+    entitlements:
+      path: HidrateWatchWidgets/HidrateWatchWidgets.entitlements
+      properties:
+        com.apple.security.application-groups: [*appGroup]
+    info:
+      path: HidrateWatchWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: Hydration
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rickybloomfield.HidrateTestApp.watchkitapp.Widgets
+        TARGETED_DEVICE_FAMILY: "4"
         SWIFT_STRICT_CONCURRENCY: complete
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"

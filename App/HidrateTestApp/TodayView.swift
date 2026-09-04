@@ -84,14 +84,12 @@ struct TodayView: View {
 
     private var progressRing: some View {
         let reached = app.goalReachedToday
-        let ringColor: Color = reached ? .green : .blue
-        return ZStack {
-            Circle().stroke(ringColor.opacity(0.15), lineWidth: 18)
-            Circle()
-                .trim(from: 0, to: app.goalProgress)
-                .stroke(ringColor, style: StrokeStyle(lineWidth: 18, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .animation(.spring(duration: 0.8), value: app.goalProgress)
+        // The tick marks where the day's pace says you should be by now. The same ring,
+        // with the same marker, is what the widget and the watch draw.
+        return HydrationRing(progress: app.goalProgress,
+                             tint: reached ? .green : .blue,
+                             paceMarker: app.paceMarker,
+                             thickness: 0.085) {
             VStack(spacing: 0) {
                 Text(app.volumeNumber(app.todayTotalML))
                     .font(.system(size: 48, weight: .bold, design: .rounded))
@@ -106,9 +104,15 @@ struct TodayView: View {
             }
         }
         .animation(.easeInOut(duration: 0.5), value: reached)
+        .animation(.spring(duration: 0.8), value: app.goalProgress)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Today's water")
-        .accessibilityValue("\(app.volume(app.todayTotalML)) of a \(app.volume(app.dailyGoalML)) goal")
+        .accessibilityValue("\(app.volume(app.todayTotalML)) of a \(app.volume(app.dailyGoalML)) goal, \(paceDescription)")
+    }
+
+    /// Spoken alongside the ring, since the pace tick is purely visual.
+    private var paceDescription: String {
+        app.isOnTrack ? "on track for today" : "\(app.volume(app.paceTargetML - app.todayTotalML)) behind"
     }
 
     // MARK: - Status
@@ -124,7 +128,7 @@ struct TodayView: View {
             if let last = app.todayItems.first {
                 Text("Last drink \(last.date.formatted(date: .omitted, time: .shortened))")
                     .font(.footnote).foregroundStyle(.secondary)
-            } else if let level = model.currentLevelML, model.isConnected {
+            } else if let level = model.clampedLevelML, model.isConnected {
                 Text("\(app.volume(level)) in bottle").font(.footnote).foregroundStyle(.secondary)
             }
         }
@@ -166,9 +170,8 @@ struct TodayView: View {
     }
 
     private func drinkRow(_ entry: IntakeEntry) -> some View {
-        let isManual = entry.source == .manual
-        return HStack(spacing: 14) {
-            Image(systemName: isManual ? "hand.tap.fill" : "waterbottle.fill")
+        HStack(spacing: 14) {
+            Image(systemName: entry.source.symbolName)
                 .foregroundStyle(.blue)
                 .frame(width: 28, height: 28)
                 .background(Color.blue.opacity(0.12), in: Circle())
@@ -177,7 +180,7 @@ struct TodayView: View {
                     Text(app.volume(entry.volumeML)).font(.body.weight(.semibold))
                     if entry.approximate { Text("≈").foregroundStyle(.orange) }
                 }
-                Text("\(isManual ? "Logged by hand" : "Bottle") · \(entry.date.formatted(date: .omitted, time: .shortened))")
+                Text("\(entry.source.rowLabel) · \(entry.date.formatted(date: .omitted, time: .shortened))")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -267,9 +270,5 @@ struct TodayView: View {
         .presentationDetents([.medium, .large])
     }
 
-    private var presets: [Double] {
-        app.unit == .ounces
-            ? [4, 8, 12, 16.9, 21, 24].map { $0 * VolumeUnit.mlPerOunce }
-            : [100, 250, 350, 500, 621, 710]
-    }
+    private var presets: [Double] { app.unit.presetsML }
 }

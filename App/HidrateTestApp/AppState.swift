@@ -9,12 +9,38 @@ struct IntakeEntry: Identifiable, Codable, Hashable {
         case weight
         case sipFrame
         case manual
+        case widget
+        case watch
 
         var title: String {
             switch self {
             case .weight: "Weight"
             case .sipFrame: "Bottle sip"
             case .manual: "Manual"
+            case .widget: "Widget"
+            case .watch: "Apple Watch"
+            }
+        }
+
+        /// True for anything the user tapped rather than the bottle measuring.
+        var isHandLogged: Bool { self == .manual || self == .widget || self == .watch }
+
+        var symbolName: String {
+            switch self {
+            case .weight, .sipFrame: "waterbottle.fill"
+            case .manual: "hand.tap.fill"
+            case .widget: "square.grid.2x2.fill"
+            case .watch: "applewatch"
+            }
+        }
+
+        /// How the drink describes itself in the Today list.
+        var rowLabel: String {
+            switch self {
+            case .weight, .sipFrame: "Bottle"
+            case .manual: "Logged by hand"
+            case .widget: "Widget"
+            case .watch: "Apple Watch"
             }
         }
     }
@@ -47,6 +73,11 @@ enum IntakeSource: String, CaseIterable, Identifiable {
 @MainActor
 @Observable
 final class AppState {
+    /// The system can launch this app into the background — Bluetooth restoration, a
+    /// drink sent from the watch, water logged in Health by another app, a scheduled
+    /// refresh — and each of those needs the same live state, built once at launch.
+    static let shared = AppState()
+
     let model: HidrateBottleModel
     let health = HealthKitWaterLogger()
     let sessionLog = SessionLog()
@@ -58,7 +89,7 @@ final class AppState {
         return nil
     }()
 
-    private(set) var entries: [IntakeEntry] = [] { didSet { saveEntries() } }
+    private(set) var entries: [IntakeEntry] = [] { didSet { saveEntries(); publishSnapshot() } }
     var autoLogToHealth: Bool { didSet { defaults.set(autoLogToHealth, forKey: Keys.autoLog) } }
     var intakeSource: IntakeSource { didSet { defaults.set(intakeSource.rawValue, forKey: Keys.source) } }
     var minimumLogML: Double { didSet { defaults.set(minimumLogML, forKey: Keys.minimumLog) } }
@@ -81,11 +112,25 @@ final class AppState {
         }
     }
 
-    var unit: VolumeUnit { didSet { defaults.set(unit.rawValue, forKey: Keys.unit); Task { await rescheduleReminders() } } }
-    var dailyGoalML: Double { didSet { defaults.set(dailyGoalML, forKey: Keys.goal); Task { await rescheduleReminders() } } }
+    var unit: VolumeUnit {
+        didSet {
+            defaults.set(unit.rawValue, forKey: Keys.unit)
+            publishSnapshot()
+            Task { await rescheduleReminders() }
+        }
+    }
+    var dailyGoalML: Double {
+        didSet {
+            defaults.set(dailyGoalML, forKey: Keys.goal)
+            publishSnapshot()
+            Task { await rescheduleReminders() }
+        }
+    }
     var reminders: ReminderSettings {
         didSet {
             if let data = try? JSONEncoder().encode(reminders) { defaults.set(data, forKey: Keys.reminders) }
+            // The window is what the pace marker on every ring is drawn from.
+            publishSnapshot()
             Task { await rescheduleReminders() }
         }
     }
@@ -111,6 +156,10 @@ final class AppState {
             model.client.options = options
         }
     }
+
+    /// Ids of widget and watch drinks already folded into `entries`, echoed back in the
+    /// snapshot so the watch knows to stop counting them itself.
+    var adoptedDrinkIDs: [UUID] = [] { didSet { defaults.set(adoptedDrinkIDs.map(\.uuidString), forKey: Keys.adopted) } }
 
     private(set) var healthTodayML: Double?
     private(set) var healthAuthorized = false
@@ -139,6 +188,7 @@ final class AppState {
         static let ledStopByte = "app.ledStopByte"
         static let ledStopDelay = "app.ledStopDelay"
         static let tracker = "app.trackerConfiguration"
+        static let adopted = "app.adoptedDrinkIDs"
     }
 
     init() {
@@ -178,6 +228,7 @@ final class AppState {
         let support = (try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
             ?? FileManager.default.temporaryDirectory
         entriesURL = support.appendingPathComponent("intake-entries.json")
+        adoptedDrinkIDs = (defaults.stringArray(forKey: Keys.adopted) ?? []).compactMap(UUID.init(uuidString:))
         loadEntries()
 
         if let data = defaults.data(forKey: Keys.tracker),
@@ -185,6 +236,13 @@ final class AppState {
             model.trackerConfiguration = configuration
         }
 
+        PhoneWatchLink.shared.activate { [weak self] drink in
+            self?.adopt(drink)
+        } currentSnapshot: { [weak self] in
+            guard let self else { return HydrationSnapshot() }
+            await self.catchUp()
+            return self.snapshot
+        }
         model.onLevelChange = { [weak self] event in self?.handle(event) }
         model.onSip = { [weak self] record in self?.handle(record) }
         model.onEvent = { [weak self] event in self?.sessionLog.record(event) }
@@ -192,6 +250,10 @@ final class AppState {
         healthAuthorized = HealthKitWaterLogger.isAvailable && health.canWrite
         model.reconnectLastBottle()
         startHealthObserver()
+        adoptPendingDrinks()
+        // Always write once at launch, so a fresh install has a real snapshot to read
+        // rather than whatever the defaults happen to be.
+        publishSnapshot(force: true)
         Task { await refreshHealthTotal() }
     }
 
@@ -264,13 +326,13 @@ final class AppState {
         add(entry)
     }
 
-    func addManual(volumeML: Double, at date: Date = Date()) {
-        add(IntakeEntry(id: UUID(), date: date, volumeML: volumeML, source: .manual))
+    func addManual(volumeML: Double, at date: Date = Date(), id: UUID = UUID(), source: IntakeEntry.Source = .manual) {
+        add(IntakeEntry(id: id, date: date, volumeML: volumeML, source: source))
     }
 
     private func add(_ entry: IntakeEntry) {
         sessionLog.write("intake \(Int(entry.volumeML))mL source=\(entry.source.rawValue) autoLog=\(autoLogToHealth && entry.volumeML >= minimumLogML)")
-        if flashLEDOnDrink, entry.source != .manual, model.isConnected {
+        if flashLEDOnDrink, !entry.source.isHandLogged, model.isConnected {
             flashDrinkLED()
         }
         entries.insert(entry, at: 0)
@@ -286,6 +348,21 @@ final class AppState {
     var goalProgress: Double { dailyGoalML > 0 ? min(todayTotalML / dailyGoalML, 1) : 0 }
     var remainingML: Double { max(dailyGoalML - todayTotalML, 0) }
     var goalReachedToday: Bool { todayTotalML >= dailyGoalML && dailyGoalML > 0 }
+
+    // MARK: - Pace
+
+    /// Where you'd have to be by now to finish the goal by the end of the day's drinking
+    /// window (the reminder From/Until times).
+    var paceTargetML: Double { dailyGoalML * reminders.paceFraction() }
+    var isOnTrack: Bool { todayTotalML >= paceTargetML }
+
+    /// Where the pace tick sits on the ring, or nil when there's nothing worth marking:
+    /// before the window opens, after it closes, or once the goal is in.
+    var paceMarker: Double? {
+        guard !goalReachedToday else { return nil }
+        let fraction = reminders.paceFraction()
+        return fraction > 0 && fraction < 1 ? fraction : nil
+    }
 
     private static let dayKeyFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; return f
@@ -315,7 +392,7 @@ final class AppState {
     }
 
     func rescheduleReminders() async {
-        await ReminderScheduler.apply(reminders, unit: unit, goalML: dailyGoalML)
+        await ReminderScheduler.apply(reminders, goalML: dailyGoalML, totalML: todayTotalML)
     }
 
     func refreshNotificationStatus() async {
@@ -403,14 +480,33 @@ final class AppState {
             externalTodaySamples = samples.filter { !$0.isFromThisApp && !mine.contains($0.id) }
         }
         checkGoalReached()
+        publishSnapshot()
     }
 
-    /// Watch Health so water logged in other apps appears without a manual refresh.
+    /// Watch Health so water logged in other apps appears without a manual refresh, and
+    /// ask to be woken for it so the widget and the watch don't wait for the next launch.
     private func startHealthObserver() {
         guard HealthKitWaterLogger.isAvailable else { return }
-        health.startObservingWater { [weak self] in
-            Task { @MainActor in await self?.refreshHealthTotal() }
+        health.startObservingWater { [weak self] finished in
+            Task { @MainActor in
+                await self?.refreshHealthTotal()
+                finished()
+            }
         }
+        guard health.canWrite else { return }
+        Task { [health] in try? await health.enableBackgroundDelivery() }
+    }
+
+    /// One pass of catching up, for a background refresh: take over anything logged on the
+    /// widget or the watch, re-read Health, prod a stalled bottle connection, and push the
+    /// result back out.
+    func backgroundRefresh() async {
+        sessionLog.write("background refresh")
+        model.client.nudgeReconnect()
+        await catchUp()
+        // Reminders are laid down two days at a time and only for the slots you're behind
+        // for, so they have to be re-laid even on a day when nothing else changed.
+        await rescheduleReminders()
     }
 
     // MARK: - Calibration

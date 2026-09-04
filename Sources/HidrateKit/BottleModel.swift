@@ -129,6 +129,21 @@ public final class HidrateBottleModel {
         return calibration.milliliters(forRaw: Double(stableRaw))
     }
 
+    /// The same reading held inside 0…capacity, for anywhere a number is shown to
+    /// someone. The bottle's zero drifts, so the raw conversion goes negative with water
+    /// still in the bottle; "-7.5 oz" is never a useful thing to read.
+    public var clampedLevelML: Double? {
+        guard let calibration, calibration.isValid, let stableRaw else { return nil }
+        return calibration.clampedMilliliters(forRaw: Double(stableRaw))
+    }
+
+    /// How far below the calibrated empty point the reading sits, when it does. Past a
+    /// few percent of capacity this means the empty capture is stale, not noise.
+    public var zeroDriftML: Double? {
+        guard let level = currentLevelML, level < 0 else { return nil }
+        return -level
+    }
+
     public var fillFraction: Double? {
         guard let calibration, calibration.isValid, let stableRaw else { return nil }
         return calibration.fillFraction(forRaw: Double(stableRaw))

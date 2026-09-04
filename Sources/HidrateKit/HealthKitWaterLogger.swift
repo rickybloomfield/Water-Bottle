@@ -176,11 +176,13 @@ public final class HealthKitWaterLogger: @unchecked Sendable {
 
     /// Calls `onChange` whenever water samples change in Health (any app), so the UI can
     /// refresh without polling. Only one observer runs at a time.
-    public func startObservingWater(_ onChange: @escaping @Sendable () -> Void) {
+    /// Watch for water samples from any app. `onChange` is handed a completion it must
+    /// call once it has finished; with background delivery enabled the system keeps
+    /// redelivering until it does.
+    public func startObservingWater(_ onChange: @escaping @Sendable (@escaping @Sendable () -> Void) -> Void) {
         stopObservingWater()
         let query = HKObserverQuery(sampleType: waterType, predicate: nil) { _, completion, _ in
-            onChange()
-            completion()
+            onChange { completion() }
         }
         observerQuery = query
         store.execute(query)
@@ -189,6 +191,17 @@ public final class HealthKitWaterLogger: @unchecked Sendable {
     public func stopObservingWater() {
         if let observerQuery { store.stop(observerQuery) }
         observerQuery = nil
+    }
+
+    /// Ask the system to wake the app when water is logged elsewhere, so a widget or a
+    /// watch face doesn't sit on a stale total until the app is next opened. Needs the
+    /// `com.apple.developer.healthkit.background-delivery` entitlement.
+    public func enableBackgroundDelivery(frequency: HKUpdateFrequency = .immediate) async throws {
+        try await store.enableBackgroundDelivery(for: waterType, frequency: frequency)
+    }
+
+    public func disableBackgroundDelivery() async throws {
+        try await store.disableBackgroundDelivery(for: waterType)
     }
 
     public func todayTotalML(calendar: Calendar = .current) async throws -> Double {
