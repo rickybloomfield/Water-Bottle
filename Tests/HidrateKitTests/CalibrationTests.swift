@@ -19,6 +19,12 @@ struct CalibrationTests {
         #expect(abs(calibration.milliliters(forRaw: 37115 - 1235 / 2) - 473) < 1)
     }
 
+    @Test func rawInvertsMilliliters() {
+        for ml in [0.0, 250.0, 946.0] {
+            #expect(abs(calibration.milliliters(forRaw: calibration.raw(forMilliliters: ml)) - ml) < 0.001)
+        }
+    }
+
     @Test func clampingAndFraction() {
         #expect(calibration.clampedMilliliters(forRaw: 99000) == 946)
         #expect(calibration.clampedMilliliters(forRaw: 0) == 0)
@@ -163,5 +169,52 @@ struct LevelTrackerTests {
         #expect(t.baselineML == 500)
         t.reset()
         #expect(t.baselineML == nil)
+    }
+}
+
+@Suite("Remembered level")
+struct RememberedLevelTests {
+    /// A fresh, isolated defaults domain so these don't touch the real one.
+    private func makeStore() -> (CalibrationStore, UserDefaults, String) {
+        let name = "HidrateKitTests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: name)!
+        return (CalibrationStore(defaults: defaults), defaults, name)
+    }
+
+    @Test func lastRawRoundTrips() {
+        let (store, defaults, name) = makeStore()
+        defer { defaults.removePersistentDomain(forName: name) }
+
+        #expect(store.loadLastRaw() == nil)
+        let when = Date(timeIntervalSince1970: 1_700_000_000)
+        store.saveLastRaw(36_500, date: when)
+        #expect(store.loadLastRaw()?.raw == 36_500)
+        #expect(store.loadLastRaw()?.date == when)
+    }
+
+    /// The regression: recalibrating cleared the saved level, so the Today tab drew an
+    /// empty bottle until the next connection. The raw reading has to outlive it.
+    @Test func clearingTheLastLevelLeavesTheRawReading() {
+        let (store, defaults, name) = makeStore()
+        defer { defaults.removePersistentDomain(forName: name) }
+
+        store.saveLastLevel(300, date: Date())
+        store.saveLastRaw(36_500, date: Date())
+        store.clearLastLevel()
+
+        #expect(store.loadLastLevel() == nil)
+        #expect(store.loadLastRaw()?.raw == 36_500)
+    }
+
+    /// And the point of keeping the raw: a new calibration reads the same reading
+    /// differently rather than losing it.
+    @Test func aNewCalibrationReinterpretsTheSameReading() {
+        let raw = 36_500.0
+        let before = BottleCalibration(emptyRaw: 35_880, fullRaw: 37_115, capacityML: 946)
+        // The zero drifted up by 200 raw units, so recapturing empty moves both ends.
+        let after = BottleCalibration(emptyRaw: 36_080, fullRaw: 37_315, capacityML: 946)
+
+        #expect(abs(before.milliliters(forRaw: raw) - 475.4) < 0.5)
+        #expect(abs(after.milliliters(forRaw: raw) - 322.0) < 0.5)
     }
 }

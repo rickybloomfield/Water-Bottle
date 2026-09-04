@@ -7,6 +7,8 @@ public final class CalibrationStore: @unchecked Sendable {
     private let baselineKey: String
     private let lastLevelKey: String
     private let lastLevelDateKey: String
+    private let lastRawKey: String
+    private let lastRawDateKey: String
 
     public init(defaults: UserDefaults = .standard, keyPrefix: String = "HidrateKit") {
         self.defaults = defaults
@@ -14,6 +16,8 @@ public final class CalibrationStore: @unchecked Sendable {
         baselineKey = keyPrefix + ".baselineML"
         lastLevelKey = keyPrefix + ".lastLevelML"
         lastLevelDateKey = keyPrefix + ".lastLevelDate"
+        lastRawKey = keyPrefix + ".lastRaw"
+        lastRawDateKey = keyPrefix + ".lastRawDate"
     }
 
     public func loadCalibration() -> BottleCalibration? {
@@ -53,5 +57,20 @@ public final class CalibrationStore: @unchecked Sendable {
     public func clearLastLevel() {
         defaults.removeObject(forKey: lastLevelKey)
         defaults.removeObject(forKey: lastLevelDateKey)
+    }
+
+    /// The last settled *raw* reading, kept separately from `lastLevel` and only ever used
+    /// to draw a level before the bottle reconnects. Storing the raw rather than the
+    /// millilitres means a recalibration reinterprets it instead of invalidating it, so
+    /// the bottle isn't drawn empty for the rest of the day after you recalibrate.
+    public func loadLastRaw() -> (raw: Int, date: Date)? {
+        guard defaults.object(forKey: lastRawKey) != nil,
+              let date = defaults.object(forKey: lastRawDateKey) as? Date else { return nil }
+        return (defaults.integer(forKey: lastRawKey), date)
+    }
+
+    public func saveLastRaw(_ raw: Int, date: Date) {
+        defaults.set(raw, forKey: lastRawKey)
+        defaults.set(date, forKey: lastRawDateKey)
     }
 }

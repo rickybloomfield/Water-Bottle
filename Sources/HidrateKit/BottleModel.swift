@@ -36,8 +36,9 @@ public final class HidrateBottleModel {
     public private(set) var capChangedAt: Date?
     public private(set) var latestWeight: WeightSample?
     public private(set) var stableRaw: Int?
-    /// Last settled level saved to disk, shown until a fresh reading arrives.
-    public private(set) var rememberedLevelML: Double?
+    /// Last settled raw reading saved to disk. Held as a raw value, not millilitres, so
+    /// that recalibrating reinterprets it rather than throwing it away.
+    public private(set) var rememberedRaw: Int?
     public private(set) var stableStreak = 0
     public private(set) var weightSampleCount = 0
     public private(set) var sips: [SipRecord] = []
@@ -64,9 +65,10 @@ public final class HidrateBottleModel {
             tracker.reset()
             store?.saveBaselineML(nil)
             // A new calibration invalidates any level saved under the old one, so a
-            // reconnect can't reconstruct a phantom drink across the change.
+            // reconnect can't reconstruct a phantom drink across the change. The last raw
+            // reading survives: it means the same thing under any calibration, and it is
+            // what keeps the bottle from being drawn empty until the next connection.
             store?.clearLastLevel()
-            rememberedLevelML = nil
             pendingRecoveryCheck = false
         }
     }
@@ -108,7 +110,13 @@ public final class HidrateBottleModel {
         if let baseline = store?.loadBaselineML() {
             tracker.reset(baselineML: baseline)
         }
-        rememberedLevelML = store?.loadLastLevel()?.levelML
+        if let raw = store?.loadLastRaw()?.raw {
+            rememberedRaw = raw
+        } else if let level = store?.loadLastLevel()?.levelML, let calibration, calibration.isValid {
+            // Upgrading from a version that only saved millilitres: turn what it saved
+            // back into a raw reading so the bottle isn't drawn empty on the first launch.
+            rememberedRaw = Int(calibration.raw(forMilliliters: level).rounded())
+        }
         // Subscribe synchronously so nothing emitted before the task first runs is lost.
         let events = client.events()
         eventTask = Task { [weak self] in
@@ -147,6 +155,12 @@ public final class HidrateBottleModel {
     public var fillFraction: Double? {
         guard let calibration, calibration.isValid, let stableRaw else { return nil }
         return calibration.fillFraction(forRaw: Double(stableRaw))
+    }
+
+    /// The last saved reading, read through the calibration in force now.
+    public var rememberedLevelML: Double? {
+        guard let calibration, calibration.isValid, let rememberedRaw else { return nil }
+        return calibration.milliliters(forRaw: Double(rememberedRaw))
     }
 
     /// Level to show: the live reading when we have one, otherwise the last one we saved.
@@ -341,11 +355,15 @@ public final class HidrateBottleModel {
 
         let change = tracker.ingest(levelML: levelML, at: date)
 
+        // Saved whatever the reading says. A bottle whose zero has drifted reads below
+        // empty on every sample, and gating this on plausibility left nothing to draw at
+        // launch at all — an empty bottle rather than an approximate one.
+        rememberedRaw = raw
+        store?.saveLastRaw(raw, date: date)
+
         if plausible {
             store?.saveBaselineML(tracker.baselineML)
-            let level = tracker.baselineML ?? levelML
-            store?.saveLastLevel(level, date: date)
-            rememberedLevelML = level
+            store?.saveLastLevel(tracker.baselineML ?? levelML, date: date)
         }
 
         guard let change, !change.isBaseline else { return }

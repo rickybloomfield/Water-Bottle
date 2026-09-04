@@ -87,6 +87,12 @@ a little negative is ordinary noise — but nothing shown to a person uses it an
 `clampedLevelML` is what the app displays, and when the reading is genuinely under empty
 the Bottle tab says by how much and suggests recapturing the empty point.
 
+The level the app shows before the bottle reconnects is stored as the last settled *raw*
+reading rather than as millilitres. Recalibrating then reinterprets it instead of
+invalidating it, and a bottle whose zero has drifted — every sample below the "lifted"
+threshold, so nothing counted as settled — still leaves something to draw. Both of those
+used to end the same way: an empty bottle on the Today tab until the bottle reconnected.
+
 ## The water
 
 The bottle on the Today tab holds an animated water surface: a one-dimensional

@@ -33,6 +33,12 @@ public struct BottleCalibration: Codable, Sendable, Equatable {
         return (raw - emptyRaw) / rawUnitsPerML
     }
 
+    /// The inverse of `milliliters(forRaw:)`.
+    public func raw(forMilliliters ml: Double) -> Double {
+        guard isValid else { return emptyRaw }
+        return emptyRaw + ml * rawUnitsPerML
+    }
+
     public func clampedMilliliters(forRaw raw: Double) -> Double {
         min(max(milliliters(forRaw: raw), 0), capacityML)
     }
