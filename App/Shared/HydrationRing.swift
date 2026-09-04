@@ -45,9 +45,17 @@ struct HydrationRing<Content: View>: View {
                     Circle()
                         .inset(by: lineWidth / 2)
                         .trim(from: overflow, to: overflow + shadow)
-                        .stroke(Color.black.opacity(0.55), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                        .stroke(Color.black.opacity(0.28), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                         .blur(radius: lineWidth * 0.1)
+                        // Kept inside the track. Blurring alone spreads it past both
+                        // edges of the ring, where it darkens the background instead of
+                        // the green it is meant to sit on.
+                        .mask {
+                            Circle()
+                                .inset(by: lineWidth / 2)
+                                .stroke(Color.white, style: StrokeStyle(lineWidth: lineWidth))
+                        }
                     Circle()
                         .inset(by: lineWidth / 2)
                         .trim(from: 0, to: overflow)
