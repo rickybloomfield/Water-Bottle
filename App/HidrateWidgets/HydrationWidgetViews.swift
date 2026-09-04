@@ -26,7 +26,7 @@ struct RingWidgetView: View {
         HydrationRing(progress: snapshot.progress, tint: snapshot.tint, paceMarker: snapshot.paceMarker()) {
             HydrationRingLabel(snapshot: snapshot, numberSize: 36, goalSize: 13)
         }
-        .padding(10)
+        .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
@@ -36,12 +36,12 @@ struct QuickAddWidgetView: View {
     var snapshot: HydrationSnapshot
 
     var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 22) {
             HydrationRing(progress: snapshot.progress, tint: snapshot.tint, paceMarker: snapshot.paceMarker()) {
                 HydrationRingLabel(snapshot: snapshot, numberSize: 26, goalSize: 11)
             }
             // Held a little under the widget's height, which leaves the amounts more room.
-            .frame(maxWidth: 116, maxHeight: 116)
+            .frame(maxWidth: 124, maxHeight: 124)
 
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 2), spacing: 8) {
                 ForEach(snapshot.presetsML, id: \.self) { ml in

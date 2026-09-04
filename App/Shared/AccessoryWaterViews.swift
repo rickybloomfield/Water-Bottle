@@ -14,13 +14,13 @@ struct CircularWaterView: View {
         HydrationRing(progress: snapshot.progress,
                       tint: snapshot.tint,
                       paceMarker: snapshot.paceMarker(),
-                      markerStyle: .dot,
                       thickness: 0.17) {
             Text(snapshot.number(snapshot.totalML))
                 .font(.system(size: 24, weight: .semibold, design: .rounded))
                 .minimumScaleFactor(0.4)
                 .lineLimit(1)
         }
+        .padding(2)
         .widgetAccentable()
         .accessibilityLabel("Water today")
         .accessibilityValue("\(snapshot.volume(snapshot.totalML)) of a \(snapshot.volume(snapshot.goalML)) goal")
