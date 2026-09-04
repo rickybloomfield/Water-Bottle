@@ -51,6 +51,15 @@ public struct BottleClientOptions: Sendable, Equatable {
     /// address (and therefore its CoreBluetooth identifier) from time to time; a connect
     /// request aimed at the old identity never completes. Strongly recommended.
     public var rescanWhileConnecting = true
+    /// Write the LED "off" byte once the connection handshake is done.
+    ///
+    /// The initialisation the official app performs — which this replays, because the
+    /// bottle stays silent without it — leaves the light doing something on every
+    /// connect. Since the PRO 2 drops the link every quarter of an hour, that is a flash
+    /// four times an hour for no reason. The bottle's own lights (a logged drink, the
+    /// goal, its scheduled glow reminders) are unaffected: this fires once, immediately,
+    /// before any of those can happen.
+    public var silenceLEDAfterHandshake = true
 
     public init() {}
 }
@@ -482,6 +491,14 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         }
     }
 
+    /// Put the light out after connecting, so the handshake's own writes don't leave it
+    /// blinking. Called on the client queue, straight after the last handshake step.
+    private func silenceLEDIfWanted() {
+        guard _options.silenceLEDAfterHandshake, characteristic(HidrateUUID.ledControl) != nil else { return }
+        log(.info, "Quieting the connect-time light")
+        write(HidrateUUID.ledControl, Data([0x00]))
+    }
+
     public func setLED(_ pattern: LEDPattern) {
         setLED(rawByte: pattern.rawValue)
     }
@@ -631,7 +648,10 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         if let steps, characteristic(HidrateUUID.setPoint) != nil {
             state = .handshaking
             log(.info, "Sending \(steps.count)-step \(mode.rawValue) init")
-            runHandshake(steps) { [weak self] in self?.subscribeToStreams() }
+            runHandshake(steps) { [weak self] in
+                self?.silenceLEDIfWanted()
+                self?.subscribeToStreams()
+            }
             return
         }
         subscribeToStreams()

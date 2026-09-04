@@ -144,6 +144,17 @@ final class AppState {
     }
 
     var flashLEDOnDrink: Bool { didSet { defaults.set(flashLEDOnDrink, forKey: Keys.flashLED) } }
+    var flashLEDOnGoal: Bool { didSet { defaults.set(flashLEDOnGoal, forKey: Keys.flashGoalLED) } }
+    /// Put the bottle's light out as soon as the connection handshake finishes, so the
+    /// handshake's own writes don't leave it flashing every time the bottle reconnects.
+    var quietLightOnConnect: Bool {
+        didSet {
+            defaults.set(quietLightOnConnect, forKey: Keys.quietOnConnect)
+            var options = model.client.options
+            options.silenceLEDAfterHandshake = quietLightOnConnect
+            model.client.options = options
+        }
+    }
     var drinkLEDByte: Int { didSet { defaults.set(drinkLEDByte, forKey: Keys.ledByte) } }
     var ledStopEnabled: Bool { didSet { defaults.set(ledStopEnabled, forKey: Keys.ledStop) } }
     var ledStopByte: Int { didSet { defaults.set(ledStopByte, forKey: Keys.ledStopByte) } }
@@ -180,6 +191,8 @@ final class AppState {
         static let exploreAll = "app.exploreAllCharacteristics"
         static let readUnknown = "app.readUnknownOnConnect"
         static let flashLED = "app.flashLEDOnDrink"
+        static let flashGoalLED = "app.flashLEDOnGoal"
+        static let quietOnConnect = "app.quietLightOnConnect"
         static let unit = "app.unit"
         static let goal = "app.dailyGoalML"
         static let reminders = "app.reminders"
@@ -209,6 +222,10 @@ final class AppState {
         dailyGoalML = defaults.object(forKey: Keys.goal) as? Double ?? (64 * VolumeUnit.mlPerOunce)
         reminders = (defaults.data(forKey: Keys.reminders)).flatMap { try? JSONDecoder().decode(ReminderSettings.self, from: $0) } ?? ReminderSettings()
         flashLEDOnDrink = defaults.object(forKey: Keys.flashLED) as? Bool ?? true
+        flashLEDOnGoal = defaults.object(forKey: Keys.flashGoalLED) as? Bool ?? true
+        let quiet = defaults.object(forKey: Keys.quietOnConnect) as? Bool ?? true
+        options.silenceLEDAfterHandshake = quiet
+        quietLightOnConnect = quiet
         drinkLEDByte = defaults.object(forKey: Keys.ledByte) as? Int ?? Int(LEDPattern.drinkSuccess.rawValue)
         ledStopEnabled = defaults.object(forKey: Keys.ledStop) as? Bool ?? true
         ledStopByte = defaults.object(forKey: Keys.ledStopByte) as? Int ?? 0x00 // best guess for "off"
@@ -398,7 +415,7 @@ final class AppState {
         lastCelebratedDay = today
         showCelebration = true
         sessionLog.write("goal reached: \(Int(todayTotalML))mL of \(Int(dailyGoalML))mL")
-        if model.isConnected { model.client.setLED(.goalAchieved) }
+        if flashLEDOnGoal, model.isConnected { model.client.setLED(.goalAchieved) }
     }
 
     // MARK: - Reminders

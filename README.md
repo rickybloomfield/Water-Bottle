@@ -93,6 +93,22 @@ invalidating it, and a bottle whose zero has drifted — every sample below the 
 threshold, so nothing counted as settled — still leaves something to draw. Both of those
 used to end the same way: an empty bottle on the Today tab until the bottle reconnected.
 
+## The bottle's light
+
+The bottle only lights up for three things: a drink the app logged, reaching the day's
+goal, and its own scheduled glow reminders, which the firmware runs from the slot table
+written during the connection handshake.
+
+The handshake also left the light doing something on every connect. Since the PRO 2 drops
+the link roughly every fifteen minutes, that is a flash four times an hour for nothing.
+The client now writes the off byte (`0x00`) as soon as the handshake finishes —
+**Settings → Bottle light → Stay dark on connect**, on by default. The three lights above
+all happen after that point, so none of them are affected.
+
+The drink light's byte is a firmware preset, and the Debug area can set it to any byte at
+all. Settings now says when the stored byte isn't one of the known presets, rather than
+showing the picker's fallback and quietly playing something else.
+
 ## When a drink goes missing
 
 Every settled reading now gets a line in the session log when there is anything to say

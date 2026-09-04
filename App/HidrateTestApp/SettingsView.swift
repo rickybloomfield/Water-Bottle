@@ -110,22 +110,32 @@ struct SettingsView: View {
 
     private var lightSection: some View {
         @Bindable var app = app
+        let known = LEDPattern(rawValue: UInt8(app.drinkLEDByte & 0xFF))
         return Section {
             Toggle("Glow when a drink is logged", isOn: $app.flashLEDOnDrink)
             if app.flashLEDOnDrink {
                 Picker("Light", selection: Binding(
-                    get: { LEDPattern(rawValue: UInt8(app.drinkLEDByte & 0xFF)) ?? .drinkSuccess },
+                    get: { known ?? .drinkSuccess },
                     set: { app.drinkLEDByte = Int($0.rawValue) }
                 )) {
                     ForEach(LEDPattern.allCases) { Text($0.title).tag($0) }
                 }
+                if known == nil {
+                    // The picker can't show a byte that isn't one of the presets, so say
+                    // so rather than displaying the wrong thing.
+                    LabeledContent("Currently", value: String(format: "custom byte 0x%02X", app.drinkLEDByte & 0xFF))
+                        .foregroundStyle(.orange)
+                    Button("Use the standard blue glow") { app.drinkLEDByte = Int(LEDPattern.drinkSuccess.rawValue) }
+                }
                 Button("Preview on the bottle") { app.flashDrinkLED() }
                     .disabled(!app.model.isConnected)
             }
+            Toggle("Glow when you reach your goal", isOn: $app.flashLEDOnGoal)
+            Toggle("Stay dark on connect", isOn: $app.quietLightOnConnect)
         } header: {
             Text("Bottle light")
         } footer: {
-            Text("The bottle glows to confirm each drink the app logs. It also flashes its goal light when you hit your daily goal.")
+            Text("The bottle's own scheduled glow reminders come from the connection handshake and are unaffected. \"Stay dark on connect\" puts the light out as soon as that handshake finishes, so the bottle doesn't flash every time it reconnects — which it does about four times an hour.")
         }
     }
 
