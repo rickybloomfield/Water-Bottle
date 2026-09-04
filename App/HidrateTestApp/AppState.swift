@@ -363,8 +363,11 @@ final class AppState {
            let fromHealth = try? await health.dailyTotalsML(days: days), !fromHealth.isEmpty {
             return fromHealth
         }
+        // The same window Health would have been asked for, so a caller paging back
+        // sees the fallback behave the same way.
+        let cutoff = calendar.date(byAdding: .day, value: -(days - 1), to: calendar.startOfDay(for: Date()))
         var totals: [Date: Double] = [:]
-        for entry in entries {
+        for entry in entries where cutoff.map({ entry.date >= $0 }) ?? true {
             totals[calendar.startOfDay(for: entry.date), default: 0] += entry.volumeML
         }
         return totals

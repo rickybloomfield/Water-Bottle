@@ -14,8 +14,9 @@ Talk to a HidrateSpark PRO water bottle directly over Bluetooth, without the off
   there; one the bottle weighed cannot, since editing a measurement would quietly disagree
   with the level the app is tracking, and one from Health belongs to the app that wrote it.
   **Progress** charts daily/weekly/monthly intake from Apple Health with streaks and
-  stats, and leads to every day there is — open one to see what it holds and to add,
-  correct or remove drinks on it, the same as Today. **Bottle** covers connection, hardware details, and calibration. **Settings**
+  stats, and leads to every day there is — filter to the ones that missed the goal, and
+  open one to see what it holds and to add, correct or remove drinks on it, the same as
+  Today. Days load a season at a time as you scroll back. **Bottle** covers connection, hardware details, and calibration. **Settings**
   holds your goal, units (oz or mL), drink reminders, the bottle's drink light, Health
   access, and a Debug area with the engineering tools.
 * **`App/HidrateWidgets`** (iOS widget): the day's ring on the home screen, with one-tap

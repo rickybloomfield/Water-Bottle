@@ -6,13 +6,20 @@ import SwiftUI
 struct AllDaysView: View {
     @Environment(AppState.self) private var app
 
-    @State private var daily: [Date: Double] = [:]
-    @State private var loaded = false
+    enum Filter: String, CaseIterable, Identifiable {
+        case all = "All days"
+        case missed = "Missed goal"
+        var id: String { rawValue }
+    }
 
-    /// A year back is as far as Health is asked; the list itself runs from today to the
-    /// earliest day with anything on it, so empty days in between can still be opened
-    /// and filled in.
-    private static let lookbackDays = 365
+    @State private var daily: [Date: Double] = [:]
+    @State private var filter: Filter = .all
+    /// How far back Health has been asked so far. Grows a season at a time as the list
+    /// is scrolled, rather than reading years nobody looks at on the way in.
+    @State private var lookbackDays = 120
+    @State private var loading = true
+
+    private static let pageDays = 180
     private static let minimumDays = 30
 
     var body: some View {
@@ -24,35 +31,103 @@ struct AllDaysView: View {
                     }
                 }
             }
+            if hasMore {
+                Section {
+                    HStack {
+                        Spacer()
+                        if loading {
+                            ProgressView()
+                        } else {
+                            Button("Load earlier days") { Task { await loadMore() } }
+                        }
+                        Spacer()
+                    }
+                    // Loads on its own when scrolled to; the button is for when it can't.
+                    .task { await loadMore() }
+                }
+                .listRowBackground(Color.clear)
+            }
         }
         .navigationTitle("Days")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Picker("Show", selection: $filter) {
+                        ForEach(Filter.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                } label: {
+                    Label("Filter", systemImage: filter == .all
+                          ? "line.3.horizontal.decrease.circle"
+                          : "line.3.horizontal.decrease.circle.fill")
+                }
+            }
+        }
         .overlay {
-            if !loaded { ProgressView() }
+            if visibleDays.isEmpty, !loading {
+                ContentUnavailableView {
+                    Label(filter == .missed ? "No missed days" : "Nothing yet", systemImage: "checkmark.circle")
+                } description: {
+                    Text(filter == .missed
+                         ? "Every day back this far reached your goal."
+                         : "Days appear here once something has been logged.")
+                }
+            }
         }
-        .task(id: app.entries.count) {
-            daily = await app.dailyTotals(days: Self.lookbackDays)
-            loaded = true
-        }
-        .refreshable { daily = await app.dailyTotals(days: Self.lookbackDays) }
+        .task(id: app.entries.count) { await load() }
+        .refreshable { await load() }
+    }
+
+    // MARK: - Loading
+
+    private func load() async {
+        loading = true
+        daily = await app.dailyTotals(days: lookbackDays)
+        loading = false
+    }
+
+    /// Ask for another stretch. Only ever extends the window, so what is already on
+    /// screen doesn't move under the finger.
+    private func loadMore() async {
+        guard hasMore, !loading else { return }
+        lookbackDays += Self.pageDays
+        await load()
     }
 
     // MARK: - Days
 
     private var calendar: Calendar { .current }
 
-    /// Today back to the earliest day with anything logged, never fewer than a month.
+    private var today: Date { calendar.startOfDay(for: Date()) }
+
+    /// Days between today and the oldest day with anything logged, but never past the
+    /// window asked for so far, and never fewer than a month — a day you forgot to log is
+    /// exactly the one worth being able to open.
     private var allDays: [Date] {
-        let today = calendar.startOfDay(for: Date())
-        let earliestWithData = daily.filter { $0.value > 0 }.keys.min()
-        let span = earliestWithData.map { calendar.dateComponents([.day], from: $0, to: today).day ?? 0 } ?? 0
-        let count = max(span + 1, Self.minimumDays)
+        let earliest = daily.filter { $0.value > 0 }.keys.min()
+        let toEarliest = earliest.map { (calendar.dateComponents([.day], from: $0, to: today).day ?? 0) + 1 } ?? 0
+        let count = max(min(toEarliest, lookbackDays), Self.minimumDays)
         return (0..<count).compactMap { calendar.date(byAdding: .day, value: -$0, to: today) }
+    }
+
+    /// There is more to fetch when the data reaches the edge of the window we asked for.
+    private var hasMore: Bool {
+        guard let earliest = daily.filter({ $0.value > 0 }).keys.min() else { return false }
+        let toEarliest = (calendar.dateComponents([.day], from: earliest, to: today).day ?? 0) + 1
+        return toEarliest >= lookbackDays
+    }
+
+    private var visibleDays: [Date] {
+        switch filter {
+        case .all: allDays
+        // Today is still running, so it hasn't missed anything yet.
+        case .missed: allDays.filter { !calendar.isDateInToday($0) && !reachedGoal($0) }
+        }
     }
 
     private var months: [Date] {
         var seen: [Date] = []
-        for day in allDays {
+        for day in visibleDays {
             guard let start = calendar.dateInterval(of: .month, for: day)?.start else { continue }
             if seen.last != start { seen.append(start) }
         }
@@ -60,13 +135,21 @@ struct AllDaysView: View {
     }
 
     private func days(in month: Date) -> [Date] {
-        allDays.filter { calendar.dateInterval(of: .month, for: $0)?.start == month }
+        visibleDays.filter { calendar.dateInterval(of: .month, for: $0)?.start == month }
+    }
+
+    private func total(_ day: Date) -> Double {
+        // Today's total is live; every other day comes from the figures just loaded.
+        calendar.isDateInToday(day) ? app.todayTotalML : (daily[day] ?? 0)
+    }
+
+    private func reachedGoal(_ day: Date) -> Bool {
+        app.dailyGoalML > 0 && total(day) >= app.dailyGoalML
     }
 
     private func row(_ day: Date) -> some View {
-        // Today's total is live; every other day comes from the figures just loaded.
-        let ml = calendar.isDateInToday(day) ? app.todayTotalML : (daily[day] ?? 0)
-        let reached = app.dailyGoalML > 0 && ml >= app.dailyGoalML
+        let ml = total(day)
+        let reached = reachedGoal(day)
         return HStack(spacing: 14) {
             Image(systemName: reached ? "checkmark.circle.fill" : "circle")
                 .foregroundStyle(reached ? Color.green : Color.secondary.opacity(0.5))
