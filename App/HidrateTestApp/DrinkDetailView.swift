@@ -114,7 +114,7 @@ struct DrinkDetailView: View {
 
                 if let entry {
                     Section {
-                        Button("Delete drink", role: .destructive) {
+                        Button("Delete", role: .destructive) {
                             dismiss()
                             onDelete(entry)
                         }
@@ -155,11 +155,6 @@ struct DrinkDetailView: View {
                 LabeledContent("In Apple Health", value: entry.healthKitUUID == nil ? "No" : "Yes")
                 if entry.healthKitUUID == nil {
                     Button("Save to Health") { Task { await app.logToHealth(entry) } }
-                }
-                if let before = entry.rawBefore, let after = entry.rawAfter {
-                    // What the bottle's scale read either side of the drink, which is
-                    // where the amount came from.
-                    LabeledContent("Scale", value: "\(before) → \(after)")
                 }
             } footer: {
                 if entry.approximate {
