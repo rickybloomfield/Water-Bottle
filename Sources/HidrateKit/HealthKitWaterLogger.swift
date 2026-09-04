@@ -52,8 +52,20 @@ public struct WaterSourceDevice: Sendable, Hashable {
     }
 }
 
+/// One water sample as stored in Health, from any app.
+public struct WaterSample: Sendable, Identifiable, Hashable {
+    public let id: UUID
+    public let date: Date
+    public let milliliters: Double
+    public let sourceName: String
+    public let sourceBundleID: String
+    /// True when this app wrote the sample.
+    public let isFromThisApp: Bool
+}
+
 /// Writes water intake to HealthKit as `dietaryWater` samples.
 public final class HealthKitWaterLogger: @unchecked Sendable {
+    private var observerQuery: HKObserverQuery?
     public enum LoggerError: Error, LocalizedError {
         case unavailable
         case notAuthorized
@@ -134,6 +146,49 @@ public final class HealthKitWaterLogger: @unchecked Sendable {
         )
         let statistics = try await descriptor.result(for: store)
         return statistics?.sumQuantity()?.doubleValue(for: unit) ?? 0
+    }
+
+    /// Every water sample between two dates, newest first, with its source.
+    public func samples(from start: Date, to end: Date) async throws -> [WaterSample] {
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: waterType, predicate: predicate)],
+            sortDescriptors: [SortDescriptor(\.startDate, order: .reverse)]
+        )
+        let results = try await descriptor.result(for: store)
+        let me = Bundle.main.bundleIdentifier ?? ""
+        return results.map { sample in
+            WaterSample(
+                id: sample.uuid,
+                date: sample.startDate,
+                milliliters: sample.quantity.doubleValue(for: unit),
+                sourceName: sample.sourceRevision.source.name,
+                sourceBundleID: sample.sourceRevision.source.bundleIdentifier,
+                isFromThisApp: sample.sourceRevision.source.bundleIdentifier == me
+            )
+        }
+    }
+
+    public func todaySamples(calendar: Calendar = .current) async throws -> [WaterSample] {
+        let start = calendar.startOfDay(for: Date())
+        return try await samples(from: start, to: Date())
+    }
+
+    /// Calls `onChange` whenever water samples change in Health (any app), so the UI can
+    /// refresh without polling. Only one observer runs at a time.
+    public func startObservingWater(_ onChange: @escaping @Sendable () -> Void) {
+        stopObservingWater()
+        let query = HKObserverQuery(sampleType: waterType, predicate: nil) { _, completion, _ in
+            onChange()
+            completion()
+        }
+        observerQuery = query
+        store.execute(query)
+    }
+
+    public func stopObservingWater() {
+        if let observerQuery { store.stop(observerQuery) }
+        observerQuery = nil
     }
 
     public func todayTotalML(calendar: Calendar = .current) async throws -> Double {

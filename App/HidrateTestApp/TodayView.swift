@@ -68,25 +68,28 @@ struct TodayView: View {
     }
 
     private var progressRing: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let reached = app.goalReachedToday
+        let ringColor: Color = reached ? .green : .blue
+        return VStack(alignment: .leading, spacing: 14) {
             ZStack {
-                Circle().stroke(Color.blue.opacity(0.15), lineWidth: 16)
+                Circle().stroke(ringColor.opacity(0.15), lineWidth: 16)
                 Circle()
                     .trim(from: 0, to: app.goalProgress)
-                    .stroke(app.goalReachedToday ? AnyShapeStyle(Color.green) : AnyShapeStyle(Color.blue),
-                            style: StrokeStyle(lineWidth: 16, lineCap: .round))
+                    .stroke(ringColor, style: StrokeStyle(lineWidth: 16, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .animation(.spring(duration: 0.8), value: app.goalProgress)
                 VStack(spacing: 2) {
                     Text(app.volumeNumber(app.todayTotalML))
                         .font(.system(size: 38, weight: .bold, design: .rounded))
                         .monospacedDigit()
+                        .foregroundStyle(reached ? Color.green : Color.primary)
                         .contentTransition(.numericText())
                         .animation(.snappy, value: app.todayTotalML)
                     Text(app.unit.symbol).font(.subheadline).foregroundStyle(.secondary)
                 }
             }
             .frame(width: 150, height: 150)
+            .animation(.easeInOut(duration: 0.5), value: reached)
 
             VStack(alignment: .leading, spacing: 3) {
                 if app.goalReachedToday {
@@ -110,7 +113,7 @@ struct TodayView: View {
                     .font(.footnote.weight(.medium))
             }
             Spacer()
-            if let last = app.todayEntries.first {
+            if let last = app.todayItems.first {
                 Text("Last drink \(last.date.formatted(date: .omitted, time: .shortened))")
                     .font(.footnote).foregroundStyle(.secondary)
             } else if let level = model.currentLevelML, model.isConnected {
@@ -123,13 +126,14 @@ struct TodayView: View {
     // MARK: - Drinks
 
     private var drinksSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let items = app.todayItems
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Drinks today").font(.headline)
                 Spacer()
-                Text("\(app.todayEntries.count)").font(.subheadline).foregroundStyle(.secondary)
+                Text("\(items.count)").font(.subheadline).foregroundStyle(.secondary)
             }
-            if app.todayEntries.isEmpty {
+            if items.isEmpty {
                 ContentUnavailableView {
                     Label("No drinks yet", systemImage: "drop")
                 } description: {
@@ -140,9 +144,12 @@ struct TodayView: View {
                 .background(.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(app.todayEntries.enumerated()), id: \.element.id) { index, entry in
-                        drinkRow(entry)
-                        if index < app.todayEntries.count - 1 { Divider().padding(.leading, 56) }
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        switch item {
+                        case .entry(let entry): drinkRow(entry)
+                        case .health(let sample): healthRow(sample)
+                        }
+                        if index < items.count - 1 { Divider().padding(.leading, 56) }
                     }
                 }
                 .background(.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -151,8 +158,9 @@ struct TodayView: View {
     }
 
     private func drinkRow(_ entry: IntakeEntry) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: entry.source == .manual ? "hand.tap.fill" : "drop.fill")
+        let isManual = entry.source == .manual
+        return HStack(spacing: 14) {
+            Image(systemName: isManual ? "hand.tap.fill" : "waterbottle.fill")
                 .foregroundStyle(.blue)
                 .frame(width: 28, height: 28)
                 .background(Color.blue.opacity(0.12), in: Circle())
@@ -161,12 +169,14 @@ struct TodayView: View {
                     Text(app.volume(entry.volumeML)).font(.body.weight(.semibold))
                     if entry.approximate { Text("≈").foregroundStyle(.orange) }
                 }
-                Text(entry.date.formatted(date: .omitted, time: .shortened)).font(.caption).foregroundStyle(.secondary)
+                Text("\(isManual ? "Logged by hand" : "Bottle") · \(entry.date.formatted(date: .omitted, time: .shortened))")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             Image(systemName: entry.healthKitUUID == nil ? "heart" : "heart.fill")
                 .foregroundStyle(entry.healthKitUUID == nil ? Color.secondary : Color.pink)
                 .font(.subheadline)
+                .accessibilityLabel(entry.healthKitUUID == nil ? "Not saved to Health" : "Saved to Health")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -177,6 +187,28 @@ struct TodayView: View {
             }
             Button("Delete", systemImage: "trash", role: .destructive) { Task { await app.delete(entry) } }
         }
+    }
+
+    /// Water another app wrote to Health. Read-only here; it counts toward the goal.
+    private func healthRow(_ sample: WaterSample) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: "heart.fill")
+                .foregroundStyle(.pink)
+                .frame(width: 28, height: 28)
+                .background(Color.pink.opacity(0.12), in: Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text(app.volume(sample.milliliters)).font(.body.weight(.semibold))
+                Text("\(sample.sourceName) · \(sample.date.formatted(date: .omitted, time: .shortened))")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text("Health").font(.caption2.weight(.semibold))
+                .padding(.horizontal, 7).padding(.vertical, 3)
+                .background(Color.pink.opacity(0.12), in: Capsule())
+                .foregroundStyle(.pink)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     // MARK: - Manual add

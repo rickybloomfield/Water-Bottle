@@ -107,6 +107,8 @@ final class AppState {
 
     private(set) var healthTodayML: Double?
     private(set) var healthAuthorized = false
+    /// Today's water samples written by *other* apps (ours are already in `entries`).
+    private(set) var externalTodaySamples: [WaterSample] = []
     var lastError: String?
 
     private let defaults = UserDefaults.standard
@@ -182,6 +184,7 @@ final class AppState {
 
         healthAuthorized = HealthKitWaterLogger.isAvailable && health.canWrite
         model.reconnectLastBottle()
+        startHealthObserver()
         Task { await refreshHealthTotal() }
     }
 
@@ -201,7 +204,34 @@ final class AppState {
         entries.filter { Calendar.current.isDateInToday($0.date) }
     }
 
-    var todayTotalML: Double { todayEntries.reduce(0) { $0 + $1.volumeML } }
+    /// Everything you drank today: this app's drinks plus water logged in Health by other apps.
+    var todayTotalML: Double {
+        todayEntries.reduce(0) { $0 + $1.volumeML } + externalTodaySamples.reduce(0) { $0 + $1.milliliters }
+    }
+
+    enum TodayItem: Identifiable {
+        case entry(IntakeEntry)
+        case health(WaterSample)
+
+        var id: String {
+            switch self {
+            case .entry(let e): "e-\(e.id.uuidString)"
+            case .health(let s): "h-\(s.id.uuidString)"
+            }
+        }
+        var date: Date {
+            switch self { case .entry(let e): e.date; case .health(let s): s.date }
+        }
+        var volumeML: Double {
+            switch self { case .entry(let e): e.volumeML; case .health(let s): s.milliliters }
+        }
+    }
+
+    /// Today's drinks from every source, newest first.
+    var todayItems: [TodayItem] {
+        (todayEntries.map(TodayItem.entry) + externalTodaySamples.map(TodayItem.health))
+            .sorted { $0.date > $1.date }
+    }
 
     private func handle(_ event: LevelChangeEvent) {
         sessionLog.write("levelChange \(event.change)\(event.approximate ? " [recovered]" : "") raw=\(event.stableRaw)")
@@ -350,6 +380,7 @@ final class AppState {
             try await health.requestAuthorization()
             healthAuthorized = health.canWrite
             if !healthAuthorized { lastError = "Health access was not granted for water intake." }
+            startHealthObserver()
             await refreshHealthTotal()
         } catch {
             lastError = error.localizedDescription
@@ -360,6 +391,19 @@ final class AppState {
         guard HealthKitWaterLogger.isAvailable else { return }
         healthAuthorized = health.canWrite
         healthTodayML = try? await health.todayTotalML()
+        if let samples = try? await health.todaySamples() {
+            let mine = Set(entries.compactMap(\.healthKitUUID))
+            externalTodaySamples = samples.filter { !$0.isFromThisApp && !mine.contains($0.id) }
+        }
+        checkGoalReached()
+    }
+
+    /// Watch Health so water logged in other apps appears without a manual refresh.
+    private func startHealthObserver() {
+        guard HealthKitWaterLogger.isAvailable else { return }
+        health.startObservingWater { [weak self] in
+            Task { @MainActor in await self?.refreshHealthTotal() }
+        }
     }
 
     // MARK: - Calibration
