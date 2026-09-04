@@ -400,6 +400,8 @@ final class AppState {
     // MARK: - Goal
 
     var goalProgress: Double { dailyGoalML > 0 ? min(todayTotalML / dailyGoalML, 1) : 0 }
+    /// How far round a second lap of the ring, once the goal is beaten.
+    var goalOverflow: Double { dailyGoalML > 0 ? min(max(todayTotalML / dailyGoalML - 1, 0), 1) : 0 }
     var remainingML: Double { max(dailyGoalML - todayTotalML, 0) }
     var goalReachedToday: Bool { todayTotalML >= dailyGoalML && dailyGoalML > 0 }
 

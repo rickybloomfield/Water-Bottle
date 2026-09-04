@@ -23,7 +23,8 @@ struct RingWidgetView: View {
     var snapshot: HydrationSnapshot
 
     var body: some View {
-        HydrationRing(progress: snapshot.progress, tint: snapshot.tint, paceMarker: snapshot.paceMarker()) {
+        HydrationRing(progress: snapshot.progress, overflow: snapshot.overflow,
+                      tint: snapshot.tint, paceMarker: snapshot.paceMarker()) {
             HydrationRingLabel(snapshot: snapshot, numberSize: 36, goalSize: 13)
         }
         .padding(14)
@@ -37,7 +38,8 @@ struct QuickAddWidgetView: View {
 
     var body: some View {
         HStack(spacing: 22) {
-            HydrationRing(progress: snapshot.progress, tint: snapshot.tint, paceMarker: snapshot.paceMarker()) {
+            HydrationRing(progress: snapshot.progress, overflow: snapshot.overflow,
+                          tint: snapshot.tint, paceMarker: snapshot.paceMarker()) {
                 HydrationRingLabel(snapshot: snapshot, numberSize: 26, goalSize: 11)
             }
             // Held a little under the widget's height, which leaves the amounts more room.

@@ -10,7 +10,8 @@ struct WatchTodayView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 8) {
-                    HydrationRing(progress: snapshot.progress, tint: snapshot.tint, paceMarker: snapshot.paceMarker()) {
+                    HydrationRing(progress: snapshot.progress, overflow: snapshot.overflow,
+                                  tint: snapshot.tint, paceMarker: snapshot.paceMarker()) {
                         HydrationRingLabel(snapshot: snapshot, numberSize: 26, goalSize: 11)
                     }
                     .frame(maxWidth: 104)

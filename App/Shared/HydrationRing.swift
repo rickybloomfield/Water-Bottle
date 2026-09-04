@@ -4,6 +4,8 @@ import SwiftUI
 /// Today tab so all three read as the same object.
 struct HydrationRing<Content: View>: View {
     var progress: Double
+    /// How far round a second lap, drawn on top of the first once the goal is beaten.
+    var overflow: Double = 0
     var tint: Color
     /// Where you'd need to be right now to finish the goal by the end of the day's
     /// drinking window, as a fraction of the ring. Nil draws no marker.
@@ -28,6 +30,18 @@ struct HydrationRing<Content: View>: View {
                     Circle()
                         .inset(by: lineWidth / 2)
                         .trim(from: 0, to: progress)
+                        // Once a second lap is running the first one steps back, which is
+                        // what makes the second one's leading end legible on top of it.
+                        // Opacity rather than a second colour, so it survives the
+                        // monochrome rendering a watch face and the lock screen impose.
+                        .stroke(overflow > 0 ? tint.opacity(0.4) : tint,
+                                style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+                if overflow > 0 {
+                    Circle()
+                        .inset(by: lineWidth / 2)
+                        .trim(from: 0, to: overflow)
                         .stroke(tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                 }

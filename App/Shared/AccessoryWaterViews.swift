@@ -12,9 +12,12 @@ struct CircularWaterView: View {
         // pace marker. `widgetAccentable` puts it in the accent group, which is what a
         // watch face that tints its complications colours with the face's own colour.
         HydrationRing(progress: snapshot.progress,
+                      overflow: snapshot.overflow,
                       tint: snapshot.tint,
                       paceMarker: snapshot.paceMarker(),
-                      thickness: 0.17) {
+                      // Measured against the accessoryCircularCapacity gauge this
+                      // replaced, so it sits at the same weight as Activity and Weather.
+                      thickness: 0.103) {
             Text(snapshot.number(snapshot.totalML))
                 .font(.system(size: 24, weight: .semibold, design: .rounded))
                 .minimumScaleFactor(0.4)

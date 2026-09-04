@@ -49,6 +49,11 @@ Keeping the three of them agreeing takes three rules:
 * **A drink from the watch goes out twice**, as a live message and as a queued transfer.
   The phone keys drinks by id, so arriving twice costs nothing, and arriving late does.
 
+Past the goal the ring keeps going: the finished lap steps back to a fainter shade of the
+same colour and the second lap is drawn over it at full strength, so its leading end reads
+green-on-green. Opacity rather than a second colour, because a watch face and the lock
+screen flatten everything to one.
+
 Every ring carries a tick showing where the day's pace says you should be by now, spread
 evenly across the drink window from the reminder settings — ahead of the tick you're on
 track, behind it you're falling back. The complication has no room for a unit, so it shows

@@ -87,6 +87,7 @@ struct TodayView: View {
         // The tick marks where the day's pace says you should be by now. The same ring,
         // with the same marker, is what the widget and the watch draw.
         return HydrationRing(progress: app.goalProgress,
+                             overflow: app.goalOverflow,
                              tint: reached ? .green : .blue,
                              paceMarker: app.paceMarker,
                              thickness: 0.085) {
