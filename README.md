@@ -11,6 +11,8 @@ Talk to a HidrateSpark PRO water bottle directly over Bluetooth, without the off
   ripples when tapped, draining as you drink, with a celebration when you hit the goal.
   Swipe right to step back through the last month, or pick a day from the strip along the
   top; a past day drops the bottle and the connection line, which are only true of now.
+  That sideways swipe is why a drink row has none of its own: delete one from the drink
+  itself, or from its long-press menu.
   Any drink can be tapped for its details — where it came from and whether it reached
   Apple Health. One you logged by hand, in the app or on the widget or watch, can also be corrected
   there; one the bottle weighed cannot, since editing a measurement would quietly disagree

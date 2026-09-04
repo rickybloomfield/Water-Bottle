@@ -4,6 +4,10 @@ import SwiftUI
 /// One drink in a list, whether it is the app's own or one read from Apple Health, and
 /// wherever the list is — Today or a past day. The screen around it decides what opening
 /// and deleting mean; the row only says what it looks like.
+///
+/// No swipe to delete: the Today tab pages between days with a sideways drag, and a
+/// paged container claims those before a row can. Deleting is in the drink itself, and
+/// on the long-press menu.
 struct DrinkItemRow: View {
     @Environment(AppState.self) private var app
 
@@ -55,14 +59,6 @@ struct DrinkItemRow: View {
                 Button("Save to Health", systemImage: "heart") { Task { await app.logToHealth(entry) } }
             }
             Button("Delete", systemImage: "trash", role: .destructive) { onDelete(entry) }
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) { onDelete(entry) } label: {
-                Label("Delete", systemImage: "trash")
-            }
-            // A destructive role is red by default, but the app tints itself blue and a
-            // swipe action takes the tint it inherits, which left the button blue.
-            .tint(.red)
         }
     }
 
