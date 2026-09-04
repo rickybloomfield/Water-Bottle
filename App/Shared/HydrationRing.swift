@@ -30,15 +30,22 @@ struct HydrationRing<Content: View>: View {
                     Circle()
                         .inset(by: lineWidth / 2)
                         .trim(from: 0, to: progress)
-                        // Once a second lap is running the first one steps back, which is
-                        // what makes the second one's leading end legible on top of it.
-                        // Opacity rather than a second colour, so it survives the
-                        // monochrome rendering a watch face and the lock screen impose.
-                        .stroke(overflow > 0 ? tint.opacity(0.4) : tint,
-                                style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                        .stroke(tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                 }
                 if overflow > 0 {
+                    // A second lap in the same colour, so the ring doesn't appear to
+                    // start over. What separates it from the lap underneath is a soft
+                    // shadow laid just ahead of its leading end — a difference in
+                    // brightness, which survives the single-colour rendering a watch face
+                    // and the lock screen impose where a change of hue would not.
+                    let shadow = min(lineWidth * 1.4 / (.pi * (side - lineWidth)), 1 - overflow)
+                    Circle()
+                        .inset(by: lineWidth / 2)
+                        .trim(from: overflow, to: overflow + shadow)
+                        .stroke(Color.black.opacity(0.55), style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .blur(radius: lineWidth * 0.14)
                     Circle()
                         .inset(by: lineWidth / 2)
                         .trim(from: 0, to: overflow)

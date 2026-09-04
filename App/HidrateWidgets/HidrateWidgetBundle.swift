@@ -7,7 +7,7 @@ struct HydrationWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: HydrationProvider()) { entry in
             HydrationWidgetView(entry: entry)
-                .containerBackground(.fill.tertiary, for: .widget)
+                .containerBackground(for: .widget) { WidgetBackground() }
         }
         .configurationDisplayName("Hydration")
         .description("Today's total against your goal, with one-tap amounts.")

@@ -1,6 +1,22 @@
 import SwiftUI
 import WidgetKit
 
+/// Dark on the home screen, whatever the phone's appearance, because that is what the
+/// widgets it sits among look like. The lock-screen families are left alone: the system
+/// renders those itself and a background of our own would fight it.
+struct WidgetBackground: View {
+    @Environment(\.widgetFamily) private var family
+
+    var body: some View {
+        switch family {
+        case .systemSmall, .systemMedium, .systemLarge, .systemExtraLarge:
+            Color(white: 0.09)
+        default:
+            Color.clear
+        }
+    }
+}
+
 /// Picks the layout for the family the system asked for. Each layout is its own view so
 /// it can be built and looked at on its own.
 struct HydrationWidgetView: View {
@@ -29,6 +45,7 @@ struct RingWidgetView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .environment(\.colorScheme, .dark)
     }
 }
 
@@ -53,7 +70,7 @@ struct QuickAddWidgetView: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
                             .frame(maxWidth: .infinity, minHeight: 38)
-                            .background(Color.blue.opacity(0.16), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                            .background(Color.blue.opacity(0.22), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                             .foregroundStyle(Color.blue)
                     }
                     .buttonStyle(.plain)
@@ -62,5 +79,6 @@ struct QuickAddWidgetView: View {
             }
         }
         .padding(12)
+        .environment(\.colorScheme, .dark)
     }
 }

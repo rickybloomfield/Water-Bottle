@@ -49,16 +49,20 @@ Keeping the three of them agreeing takes three rules:
 * **A drink from the watch goes out twice**, as a live message and as a queued transfer.
   The phone keys drinks by id, so arriving twice costs nothing, and arriving late does.
 
-Past the goal the ring keeps going: the finished lap steps back to a fainter shade of the
-same colour and the second lap is drawn over it at full strength, so its leading end reads
-green-on-green. Opacity rather than a second colour, because a watch face and the lock
-screen flatten everything to one.
+Past the goal the ring keeps going, in one shade the whole way round — it should read as
+one ring that went further, not as a ring that started over. What separates the second lap
+from the first is a soft shadow laid just ahead of its leading end. A shadow rather than a
+second colour, because a watch face and the lock screen render a complication in a single
+colour: a difference in brightness survives that, a difference in hue does not.
 
 Every ring carries a tick showing where the day's pace says you should be by now, spread
 evenly across the drink window from the reminder settings — ahead of the tick you're on
 track, behind it you're falling back. The complication has no room for a unit, so it shows
 the number alone; whether that number is ounces or millilitres follows the app's setting. The phone spends a budgeted
 complication transfer only when the number on the face would actually change.
+
+The home-screen sizes are dark whatever the phone's appearance, to sit with the widgets
+they sit among. The lock-screen sizes are left to the system, which renders those itself.
 
 ## Keeping up while nothing is on screen
 
