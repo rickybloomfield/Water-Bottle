@@ -27,7 +27,10 @@ enum VolumeUnit: String, CaseIterable, Identifiable, Codable {
         let number: String
         switch self {
         case .milliliters: number = String(Int(v.rounded()))
-        case .ounces: number = v < 10 ? String(format: "%.1f", v) : String(Int(v.rounded()))
+        case .ounces:
+            // Whole numbers read cleaner ("0 oz", "8 oz"); keep a decimal only for small
+            // non-integer amounts like a 4.5 oz sip.
+            number = (v < 10 && abs(v - v.rounded()) > 0.05) ? String(format: "%.1f", v) : String(Int(v.rounded()))
         }
         return showUnit ? "\(number) \(symbol)" : number
     }
