@@ -38,6 +38,10 @@ struct TodayView: View {
                     }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
+                // Down to the screen's edge, not the tab bar's. Each page is a list, and
+                // a list given the whole height insets its own content for the bar and
+                // lets the rest scroll behind it.
+                .ignoresSafeArea(.container, edges: .bottom)
             }
             .navigationTitle(selectedDay.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
             .navigationBarTitleDisplayMode(.inline)

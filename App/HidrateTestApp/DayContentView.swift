@@ -15,11 +15,8 @@ struct DayContentView: View {
 
     @State private var items: [AppState.TodayItem] = []
     @State private var loaded = false
-    /// 0 while the drinks are at rest, 1 once they have scrolled up under the header.
-    @State private var scrolledUnder: CGFloat = 0
 
     private var isToday: Bool { Calendar.current.isDateInToday(day) }
-    private var heroHeight: CGFloat { isToday ? 206 : 176 }
     private var model: HidrateBottleModel { app.model }
     /// Today's total is live and includes anything logged a moment ago; other days are
     /// whatever was read back for them.
@@ -30,16 +27,21 @@ struct DayContentView: View {
 
     var body: some View {
         List {
+            Section {
+                heroCard
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                if isToday {
+                    statusRow
+                        .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
+            }
             drinksSection
         }
         .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .background(Color(.systemGroupedBackground))
-        .trackScrolledUnder($scrolledUnder)
-        // As a safe-area inset rather than a stacked sibling: the list keeps its own
-        // bounds, so its drinks run under the tab bar the way a list is meant to, and
-        // still stop short of it.
-        .safeAreaInset(edge: .top, spacing: 0) { header }
         .task(id: app.entriesRevision) { await reload() }
         .onAppear { Task { await reload() } }
         .refreshable { await app.refreshHealthTotal(); await reload() }
@@ -47,42 +49,16 @@ struct DayContentView: View {
 
     // MARK: - Hero
 
-    /// The day's ring, held above the drinks rather than scrolling as the first of them.
-    private var header: some View {
-        VStack(spacing: 10) {
-            heroCard
-            if isToday { statusRow }
-        }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 14)
-        .frame(maxWidth: .infinity)
-        .background(Color(.systemGroupedBackground))
-        // A line under the bottom edge, not a shadow around the whole header — there is
-        // nothing behind its sides or its top for one to fall on. It fades in with the
-        // scroll, so it arrives as the drinks begin to pass beneath.
-        .overlay(alignment: .bottom) {
-            LinearGradient(colors: [.black.opacity(0.12 * scrolledUnder), .clear],
-                           startPoint: .top, endPoint: .bottom)
-                .frame(height: 7)
-                .offset(y: 7)
-                .allowsHitTesting(false)
-        }
-    }
-
     private var heroCard: some View {
         HStack(alignment: .center, spacing: 16) {
             progressRing
-                .frame(maxWidth: .infinity)
+                .aspectRatio(1, contentMode: .fit)
+                .frame(maxWidth: .infinity, maxHeight: 214)
             if isToday {
                 BottleWaterView(fillFraction: bottleFill, tint: .blue)
-                    .frame(width: 116, height: heroHeight)
+                    .frame(width: 118, height: 232)
             }
         }
-        // Fixed, because the card no longer scrolls: without it the stack takes its
-        // height from the list below and the ring is squeezed until the number inside
-        // it will not fit.
-        .frame(height: heroHeight)
         .padding(20)
         .background(.background, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .accessibilityElement(children: .combine)
