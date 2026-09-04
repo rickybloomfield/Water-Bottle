@@ -43,13 +43,14 @@ final class WaveMotionModel {
             // into a transient tilt on the heightfield so the surface sloshes as it swings.
             var diff = targetAngle - displayedAngle
             diff = atan2(sin(diff), cos(diff))
-            let step = diff * min(1, dt * 7)
+            // Follow gravity quickly; the heightfield below supplies the overshoot and slosh.
+            let step = diff * min(1, dt * 16)
             displayedAngle += step
             let angularSpeed = step / dt  // rad/s
-            simulation.gravityX = max(-1, min(1, -angularSpeed * 0.35))
+            simulation.gravityX = max(-1, min(1, -angularSpeed * 0.9))
             simulation.advance(by: dt)
 
-            displayedFill += (targetFill - displayedFill) * min(1, dt * 2.5)
+            displayedFill += (targetFill - displayedFill) * min(1, dt * 4)
         }
         lastDate = date
     }

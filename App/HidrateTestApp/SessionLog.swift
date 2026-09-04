@@ -46,7 +46,7 @@ final class SessionLog {
         case .bluetoothState(let state): write("bluetooth state=\(state.rawValue)")
         case .scanning(let on): write("scanning \(on)")
         case .discovered(let bottle): write("discovered \(bottle.name) rssi=\(bottle.rssi) id=\(bottle.id) services=\(bottle.advertisedServices) mfg=\(bottle.manufacturerData?.hexString ?? "-")")
-        case .connection(let state): write("connection \(state.label)")
+        case .connection(let state): write("connection \(state.technicalLabel)")
         case .gatt(let inventory):
             write("gatt services=\(inventory.services.count) characteristics=\(inventory.characteristics.count)")
             for service in inventory.services {

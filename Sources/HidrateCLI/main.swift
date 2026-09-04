@@ -45,7 +45,7 @@ func printEvent(_ event: BottleEvent, quiet: Bool) {
     case .discovered(let bottle):
         print("[\(stamp())] found \(bottle.name)  rssi=\(bottle.rssi)  id=\(bottle.id)  services=\(bottle.advertisedServices)  mfg=\(bottle.manufacturerData?.hexString ?? "-")")
     case .connection(let state):
-        print("[\(stamp())] connection: \(state.label)")
+        print("[\(stamp())] connection: \(state.technicalLabel)")
     case .gatt(let inventory):
         print("[\(stamp())] GATT table:")
         for service in inventory.services {

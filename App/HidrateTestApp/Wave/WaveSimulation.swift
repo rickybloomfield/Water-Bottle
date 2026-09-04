@@ -17,12 +17,12 @@ struct WaveSimulation {
     /// Neighbor coupling: sets wave travel speed.
     var neighborStiffness: Double = 2500
     /// Pull toward equilibrium: sets the slosh period.
-    var restoreStiffness: Double = 25
-    var damping: Double = 1.8
+    var restoreStiffness: Double = 48
+    var damping: Double = 0.9
     /// Points of surface offset at the edges per unit of gravityX.
-    var tiltGain: Double = 14
+    var tiltGain: Double = 20
     /// Ambient swell drive.
-    var swellAmplitude: Double = 22
+    var swellAmplitude: Double = 30
 
     private let substep: Double = 1.0 / 240.0
 
@@ -74,7 +74,7 @@ struct WaveSimulation {
 
     /// Pushes the surface down around a horizontal position (0…1) with a gaussian
     /// falloff, sending ripples outward.
-    mutating func poke(atFraction fraction: Double, strength: Double = -260) {
+    mutating func poke(atFraction fraction: Double, strength: Double = -340) {
         let center = min(max(fraction, 0), 1) * Double(columnCount - 1)
         for i in 0..<columnCount {
             let distance = (Double(i) - center) / 3.5
@@ -84,7 +84,7 @@ struct WaveSimulation {
 
     /// A whole-surface kick (used when the level drops after a drink) so the water
     /// visibly sloshes as it settles to its new height.
-    mutating func slosh(strength: Double = 140) {
+    mutating func slosh(strength: Double = 220) {
         for i in 0..<columnCount {
             let xNorm = Double(i) / Double(columnCount - 1) * 2 - 1
             velocities[i] += strength * sin(xNorm * .pi)

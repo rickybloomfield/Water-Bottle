@@ -23,7 +23,18 @@ public enum ConnectionState: Sendable, Equatable {
         }
     }
 
+    /// Short, user-facing status.
     public var label: String {
+        switch self {
+        case .disconnected: "Not connected"
+        case .connecting: "Connecting…"
+        case .discoveringServices, .handshaking: "Setting up…"
+        case .ready: "Connected"
+        }
+    }
+
+    /// Detailed status for logs and tooling.
+    public var technicalLabel: String {
         switch self {
         case .disconnected(let reason): reason.map { "Disconnected (\($0))" } ?? "Disconnected"
         case .connecting: "Connecting"

@@ -19,7 +19,7 @@ enum VolumeUnit: String, CaseIterable, Identifiable, Codable {
     /// Sensible stepper increment for goals, expressed in mL.
     var goalStepML: Double { self == .ounces ? Self.mlPerOunce * 4 : 100 }
     /// Sensible increment for a manual drink, in mL.
-    var drinkStepML: Double { self == .ounces ? Self.mlPerOunce : 25 }
+    var drinkStepML: Double { self == .ounces ? Self.mlPerOunce * 0.5 : 10 }
 
     /// "18 oz" / "532 mL". Ounces show one decimal only when small.
     func format(_ ml: Double, showUnit: Bool = true) -> String {
@@ -28,9 +28,9 @@ enum VolumeUnit: String, CaseIterable, Identifiable, Codable {
         switch self {
         case .milliliters: number = String(Int(v.rounded()))
         case .ounces:
-            // Whole numbers read cleaner ("0 oz", "8 oz"); keep a decimal only for small
-            // non-integer amounts like a 4.5 oz sip.
-            number = (v < 10 && abs(v - v.rounded()) > 0.05) ? String(format: "%.1f", v) : String(Int(v.rounded()))
+            // Whole amounts read cleaner ("8 oz"); non-whole ones keep one decimal ("16.9 oz").
+            let tenths = (v * 10).rounded() / 10
+            number = tenths == tenths.rounded() ? String(Int(tenths.rounded())) : String(format: "%.1f", tenths)
         }
         return showUnit ? "\(number) \(symbol)" : number
     }

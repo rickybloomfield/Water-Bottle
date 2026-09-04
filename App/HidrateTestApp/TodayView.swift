@@ -5,27 +5,33 @@ struct TodayView: View {
     @Environment(AppState.self) private var app
     @State private var showManualAdd = false
     @State private var manualML = 8 * VolumeUnit.mlPerOunce
+    @State private var pendingDelete: IntakeEntry?
 
     private var model: HidrateBottleModel { app.model }
 
     var body: some View {
         @Bindable var app = app
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
+            List {
+                Section {
                     heroCard
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                     statusRow
-                    drinksSection
+                        .listRowInsets(EdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 }
-                .padding(.horizontal)
-                .padding(.bottom, 24)
+
+                drinksSection
             }
-            .background(Color(.systemGroupedBackground))
+            .listStyle(.insetGrouped)
             .navigationTitle("Today")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Log a drink", systemImage: "plus") {
-                        manualML = app.unit.ml(fromValue: app.unit == .ounces ? 8 : 250)
+                        manualML = app.unit == .ounces ? 8 * VolumeUnit.mlPerOunce : 250
                         showManualAdd = true
                     }
                 }
@@ -40,6 +46,14 @@ struct TodayView: View {
                 }
             }
             .animation(.spring(duration: 0.4), value: app.showCelebration)
+            .alert("Delete this drink?",
+                   isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                   presenting: pendingDelete) { entry in
+                Button("Delete", role: .destructive) { Task { await app.delete(entry) } }
+                Button("Cancel", role: .cancel) {}
+            } message: { entry in
+                Text("This removes \(app.volume(entry.volumeML)) from today\(entry.healthKitUUID != nil ? " and from Apple Health" : "").")
+            }
             .alert("Something went wrong", isPresented: Binding(get: { app.lastError != nil }, set: { if !$0 { app.lastError = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(app.lastError ?? "") }
@@ -60,8 +74,6 @@ struct TodayView: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// The bottle shows the actual water level when we know it, otherwise your
-    /// progress toward the goal so the hero never looks broken.
     private var bottleFill: Double? {
         if model.isConnected, let fill = model.fillFraction { return fill }
         return nil
@@ -78,21 +90,25 @@ struct TodayView: View {
                     .stroke(ringColor, style: StrokeStyle(lineWidth: 16, lineCap: .round))
                     .rotationEffect(.degrees(-90))
                     .animation(.spring(duration: 0.8), value: app.goalProgress)
-                VStack(spacing: 2) {
-                    Text(app.volumeNumber(app.todayTotalML))
-                        .font(.system(size: 38, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(reached ? Color.green : Color.primary)
-                        .contentTransition(.numericText())
-                        .animation(.snappy, value: app.todayTotalML)
-                    Text(app.unit.symbol).font(.subheadline).foregroundStyle(.secondary)
-                }
+                // The number sits dead centre; the unit hangs just beneath it.
+                Text(app.volumeNumber(app.todayTotalML))
+                    .font(.system(size: 38, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(reached ? Color.green : Color.primary)
+                    .contentTransition(.numericText())
+                    .animation(.snappy, value: app.todayTotalML)
+                    .overlay(alignment: .bottom) {
+                        Text(app.unit.symbol)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .offset(y: 18)
+                    }
             }
             .frame(width: 150, height: 150)
             .animation(.easeInOut(duration: 0.5), value: reached)
 
             VStack(alignment: .leading, spacing: 3) {
-                if app.goalReachedToday {
+                if reached {
                     Label("Goal reached", systemImage: "checkmark.seal.fill")
                         .font(.subheadline.weight(.semibold)).foregroundStyle(.green)
                 } else {
@@ -109,7 +125,7 @@ struct TodayView: View {
         HStack(spacing: 12) {
             HStack(spacing: 6) {
                 Circle().fill(model.isConnected ? Color.green : Color.secondary).frame(width: 8, height: 8)
-                Text(model.isConnected ? (model.connectedBottleName ?? "Bottle connected") : model.connectionState == .connecting ? "Finding bottle…" : "Bottle not connected")
+                Text(model.isConnected ? "Bottle connected" : model.connectionState == .connecting ? "Finding bottle…" : "Bottle not connected")
                     .font(.footnote.weight(.medium))
             }
             Spacer()
@@ -120,39 +136,39 @@ struct TodayView: View {
                 Text("\(app.volume(level)) in bottle").font(.footnote).foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 4)
     }
 
     // MARK: - Drinks
 
     private var drinksSection: some View {
         let items = app.todayItems
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Drinks today").font(.headline)
-                Spacer()
-                Text("\(items.count)").font(.subheadline).foregroundStyle(.secondary)
-            }
+        return Section {
             if items.isEmpty {
                 ContentUnavailableView {
                     Label("No drinks yet", systemImage: "drop")
                 } description: {
                     Text("Take a sip from your bottle and it will show up here.")
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                        switch item {
-                        case .entry(let entry): drinkRow(entry)
-                        case .health(let sample): healthRow(sample)
-                        }
-                        if index < items.count - 1 { Divider().padding(.leading, 56) }
+                ForEach(items) { item in
+                    switch item {
+                    case .entry(let entry):
+                        drinkRow(entry)
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) { pendingDelete = entry } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                    case .health(let sample):
+                        healthRow(sample)
                     }
                 }
-                .background(.background, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            }
+        } header: {
+            HStack {
+                Text("Drinks today")
+                Spacer()
+                Text("\(items.count)")
             }
         }
     }
@@ -178,14 +194,12 @@ struct TodayView: View {
                 .font(.subheadline)
                 .accessibilityLabel(entry.healthKitUUID == nil ? "Not saved to Health" : "Saved to Health")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .contentShape(Rectangle())
+        .padding(.vertical, 4)
         .contextMenu {
             if entry.healthKitUUID == nil {
                 Button("Save to Health", systemImage: "heart") { Task { await app.logToHealth(entry) } }
             }
-            Button("Delete", systemImage: "trash", role: .destructive) { Task { await app.delete(entry) } }
+            Button("Delete", systemImage: "trash", role: .destructive) { pendingDelete = entry }
         }
     }
 
@@ -207,8 +221,7 @@ struct TodayView: View {
                 .background(Color.pink.opacity(0.12), in: Capsule())
                 .foregroundStyle(.pink)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.vertical, 4)
     }
 
     // MARK: - Manual add
@@ -217,19 +230,32 @@ struct TodayView: View {
         NavigationStack {
             Form {
                 Section {
-                    Stepper(value: $manualML, in: app.unit.drinkStepML...(1500), step: app.unit.drinkStepML) {
+                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 10) {
+                        ForEach(presets, id: \.self) { ml in
+                            Button {
+                                app.addManual(volumeML: ml)
+                                showManualAdd = false
+                            } label: {
+                                Text(app.volume(ml))
+                                    .font(.body.weight(.semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                    .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
+                } header: {
+                    Text("Quick add")
+                } footer: {
+                    Text("Tap an amount to log it right away.")
+                }
+                Section("Custom amount") {
+                    Stepper(value: $manualML, in: app.unit.drinkStepML...1500, step: app.unit.drinkStepML) {
                         HStack {
                             Text("Amount")
                             Spacer()
                             Text(app.volume(manualML)).font(.body.weight(.semibold)).monospacedDigit()
-                        }
-                    }
-                }
-                Section {
-                    HStack {
-                        ForEach(quickAmounts, id: \.self) { ml in
-                            Button(app.volume(ml)) { manualML = ml }
-                                .buttonStyle(.bordered)
                         }
                     }
                 }
@@ -246,12 +272,12 @@ struct TodayView: View {
                 }
             }
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
     }
 
-    private var quickAmounts: [Double] {
+    private var presets: [Double] {
         app.unit == .ounces
-            ? [4, 8, 12, 16].map { $0 * VolumeUnit.mlPerOunce }
-            : [100, 250, 350, 500]
+            ? [4, 8, 12, 16.9, 21, 24].map { $0 * VolumeUnit.mlPerOunce }
+            : [100, 250, 350, 500, 621, 710]
     }
 }
