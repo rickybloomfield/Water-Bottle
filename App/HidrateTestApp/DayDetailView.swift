@@ -11,107 +11,34 @@ struct DayDetailView: View {
     /// What the row that opened this day was showing, so the log can compare the two.
     var listedTotalML: Double?
 
-    @State private var items: [AppState.TodayItem] = []
     @State private var detail: AppState.TodayItem?
     @State private var pendingDelete: IntakeEntry?
     @State private var addingDrink = false
-    @State private var loaded = false
-
-    private var totalML: Double { items.reduce(0) { $0 + $1.volumeML } }
-    private var progress: Double { app.dailyGoalML > 0 ? min(totalML / app.dailyGoalML, 1) : 0 }
-    private var overflow: Double {
-        app.dailyGoalML > 0 ? min(max(totalML / app.dailyGoalML - 1, 0), 1) : 0
-    }
-    private var reached: Bool { app.dailyGoalML > 0 && totalML >= app.dailyGoalML }
 
     var body: some View {
-        List {
-            Section {
-                ring
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
-            }
-
-            Section {
-                if items.isEmpty {
-                    ContentUnavailableView {
-                        Label(loaded ? "Nothing logged" : "Loading…", systemImage: "drop")
-                    } description: {
-                        Text(loaded ? "Add what you drank with the plus button." : "")
-                    }
-                } else {
-                    ForEach(items) { item in
-                        DrinkItemRow(item: item, onOpen: { detail = item }, onDelete: { pendingDelete = $0 })
-                    }
-                }
-            } header: {
-                HStack {
-                    Text("Drinks")
-                    Spacer()
-                    Text("\(items.count)")
+        DayContentView(day: day,
+                       onOpen: { detail = $0 },
+                       onDelete: { pendingDelete = $0 })
+            .navigationTitle(DayTimeline.label(day))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Add a drink", systemImage: "plus") { addingDrink = true }
                 }
             }
-        }
-        .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Add a drink", systemImage: "plus") { addingDrink = true }
+            .task { await app.logDayBreakdown(day, listedTotalML: listedTotalML) }
+            .sheet(item: $detail) { item in
+                DrinkDetailView(item: item) { entry in pendingDelete = entry }
             }
-        }
-        // The revision rather than the count, so correcting a drink refreshes the day.
-        .task(id: app.entriesRevision) { await reload() }
-        .onAppear { Task { await reload() } }
-        .refreshable { await reload() }
-        .sheet(item: $detail) { item in
-            DrinkDetailView(item: item) { entry in pendingDelete = entry }
-        }
-        .sheet(isPresented: $addingDrink) { AddDrinkView(day: day) }
-        .alert("Delete this drink?",
-               isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
-               presenting: pendingDelete) { entry in
-            Button("Delete", role: .destructive) { Task { await app.delete(entry); await reload() } }
-            Button("Cancel", role: .cancel) {}
-        } message: { entry in
-            Text("This removes \(app.volume(entry.volumeML)) from this day\(entry.healthKitUUID != nil ? " and from Apple Health" : "").")
-        }
-    }
-
-    private var ring: some View {
-        HydrationRing(progress: progress,
-                      overflow: overflow,
-                      tint: reached ? .green : .blue,
-                      thickness: 0.09) {
-            VStack(spacing: 0) {
-                Text(app.volumeNumber(totalML))
-                    .font(.system(size: 44, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(reached ? Color.green : Color.primary)
-                Text("Goal \(app.volume(app.dailyGoalML))")
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(reached ? Color.green : Color.secondary)
-                    .padding(.top, 6)
+            .sheet(isPresented: $addingDrink) { AddDrinkView(day: day) }
+            .alert("Delete this drink?",
+                   isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                   presenting: pendingDelete) { entry in
+                Button("Delete", role: .destructive) { Task { await app.delete(entry) } }
+                Button("Cancel", role: .cancel) {}
+            } message: { entry in
+                Text("This removes \(app.volume(entry.volumeML)) from this day\(entry.healthKitUUID != nil ? " and from Apple Health" : "").")
             }
-        }
-        .frame(maxWidth: .infinity, maxHeight: 190)
-        .padding(.vertical, 12)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(title)
-        .accessibilityValue("\(app.volume(totalML)) of a \(app.volume(app.dailyGoalML)) goal")
-    }
-
-    private var title: String {
-        let calendar = Calendar.current
-        if calendar.isDateInToday(day) { return "Today" }
-        if calendar.isDateInYesterday(day) { return "Yesterday" }
-        return day.formatted(.dateTime.weekday(.wide).day().month(.wide))
-    }
-
-    private func reload() async {
-        items = await app.items(on: day)
-        loaded = true
-        await app.logDayBreakdown(day, listedTotalML: listedTotalML)
     }
 }
 
@@ -128,8 +55,17 @@ struct AddDrinkView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Amount") {
-                    VolumePresetGrid(unit: app.unit, selected: volumeML) { volumeML = $0 }
+                Section {
+                    // Tapping an amount logs it, as the Today tab's plus button always
+                    // has; the stepper below is for anything not on the list.
+                    VolumePresetGrid(unit: app.unit, selected: volumeML) { ml in
+                        app.addManual(volumeML: ml, at: onDay(time))
+                        dismiss()
+                    }
+                } header: {
+                    Text("Amount")
+                } footer: {
+                    Text("Tap an amount to log it right away.")
                 }
                 Section {
                     Stepper(value: $volumeML, in: app.unit.drinkStepML...1500, step: app.unit.drinkStepML) {
