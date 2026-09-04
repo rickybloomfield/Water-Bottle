@@ -59,19 +59,21 @@ Keeping the three of them agreeing takes three rules:
 * **A drink from the watch goes out twice**, as a live message and as a queued transfer.
   The phone keys drinks by id, so arriving twice costs nothing, and arriving late does.
 
-The circular complication is the one ring the app does not draw. Matching Apple's by
-measurement was tried twice and missed twice: a fraction of the slot came out heavier than
-everything beside it, because the slot is bigger than the circle the system draws in it,
-and taking the size from a gauge at `fixedSize` came out a tenth of the size, because a
-gauge reports about 50 pt of ideal size inside an app and about 10 pt inside a widget. The
-number that mattered could not be measured anywhere it could also be used. Measured off a
-photograph of a real watch face, every system complication on it — heart rate, Activity,
-the corner — is a 45 pt circle with a 5 pt stroke, and none of them fills its slot.
+The circular complication takes its size from a gauge and everything else from us. A
+complication's circle is not the size of its slot — measured off a photograph of a real
+face, every system complication on it is a 45 pt circle with a 5 pt stroke, and none of
+them fills the slot it sits in — and nothing inside a widget can be asked how big that
+circle is. Filling the slot came out heavier than everything beside it. Measuring a gauge's
+ideal size in the app and drawing to that came out a tenth of the size, because a gauge
+reports about 50 pt of ideal size in an app and about 10 pt in a widget.
 
-So that ring is the system's own gauge, which is what Weather draws. It matches on every
-watch and on the lock screen because it is the same object. The cost is the pace marker and
-the second lap, which a gauge cannot draw: past the goal it fills and turns green, and the
-number carries how far past. Both are still on every ring the app sizes itself.
+What works is what the first version of the view did: give a gauge a real label and let it
+lay itself out. That was the right size; it was only white and had no pace dot, because a
+gauge draws its own ring and takes its colour from the widget rather than from us. So the
+gauge is kept for its layout and hidden, and the ring is drawn into it. Two things are
+load-bearing: the gauge's label is an image and not an `EmptyView`, which is what collapsed
+it to a dot, and there is no `fixedSize`, because that is the app's number and not the
+widget's.
 
 Past the goal the ring keeps going, in one shade the whole way round — it should read as
 one ring that went further, not as a ring that started over. What separates the second lap
@@ -79,10 +81,9 @@ from the first is a soft shadow laid just ahead of its leading end. A shadow rat
 second colour, because a watch face and the lock screen render a complication in a single
 colour: a difference in brightness survives that, a difference in hue does not.
 
-Every ring the app draws carries a tick showing where the day's pace says you should be by
+Every ring carries a tick showing where the day's pace says you should be by
 now, spread evenly across the drink window from the reminder settings — ahead of the tick
-you're on track, behind it you're falling back. The circular complication is the exception,
-for the reason below. The complication has no room for a unit, so it shows
+you're on track, behind it you're falling back. The complication has no room for a unit, so it shows
 the number alone; whether that number is ounces or millilitres follows the app's setting. The phone spends a budgeted
 complication transfer only when the number on the face would actually change.
 

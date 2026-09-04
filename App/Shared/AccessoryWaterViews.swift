@@ -15,9 +15,9 @@ struct WaterRingView: View {
                       overflow: snapshot.overflow,
                       tint: snapshot.tint,
                       paceMarker: snapshot.paceMarker(),
-                      // Measured against the accessoryCircularCapacity gauge this
-                      // replaced: 5pt of stroke on the 50pt circle it draws.
-                      thickness: 0.103) {
+                      // Measured off a photograph of a real watch face: every system
+                      // complication on it is a 45pt circle with a 5pt stroke.
+                      thickness: 5.0 / 45.0) {
             Text(snapshot.number(snapshot.totalML))
                 .font(.system(size: 24, weight: .semibold, design: .rounded))
                 .minimumScaleFactor(0.4)
@@ -29,41 +29,34 @@ struct WaterRingView: View {
     }
 }
 
-/// The accessoryCircular family: the system's own circular gauge, with our number in it.
+/// The accessoryCircular family: our ring, at a gauge's size.
 ///
-/// This is the one place the ring is not drawn by hand, and the reason is that two attempts
-/// to match Apple's by measurement both missed. A ratio of the slot came out heavier than
-/// everything beside it, because the slot is larger than the circle the system draws in it.
-/// Taking the size from a gauge at `fixedSize` came out at a tenth of the size, because a
-/// gauge reports about 50pt of ideal size inside an app and about 10pt inside a widget —
-/// the number that mattered could not be measured anywhere it could also be used.
+/// A complication's circle is not the size of its slot — measured off a photograph of a
+/// real face, every system complication on it is a 45pt circle with a 5pt stroke and none
+/// of them fills the slot it sits in — and nothing in a widget can be asked how big that
+/// circle is. Filling the slot came out heavier than everything beside it. Measuring a
+/// gauge's ideal size in the app and using that came out a tenth of the size, because a
+/// gauge reports about 50pt of ideal size in an app and about 10pt in a widget.
 ///
-/// Measured off a photograph of the face, every system complication on it — the heart rate
-/// gauge, the Activity rings, the one in the top corner — is a 45pt circle with a 5pt
-/// stroke, and none of them fills its slot. Rather than chase that with another constant,
-/// the ring here is the gauge itself, which is what Weather draws. It matches on every
-/// watch and on the phone's lock screen because it is the same object.
+/// What does work is what the very first version of this view did: give a gauge a real
+/// label and let it lay itself out. That was the right size on the watch; it was only
+/// white, and had no pace dot, because a gauge draws its own ring and takes its colour
+/// from the widget rather than from us. So the gauge is kept for its layout and hidden,
+/// and the ring is drawn into it — the size from the gauge, the colour and the dot and the
+/// second lap from us.
 ///
-/// What that costs is the pace marker and the second lap past the goal: a gauge draws one
-/// arc and no dot. Both are still on every ring the app sizes itself — the Today tab, the
-/// home screen widget, the watch app — and past the goal this one fills and turns green,
-/// with the number carrying how far past.
+/// Two things here are load-bearing. The label is an image and not an `EmptyView`: a gauge
+/// with nothing to size itself against is what collapsed this to a dot. And there is no
+/// `fixedSize`, because a gauge's ideal size is a different number in a widget than in an
+/// app, and measuring the app's is what got this wrong twice.
 struct CircularWaterView: View {
     var snapshot: HydrationSnapshot
 
     var body: some View {
-        Gauge(value: snapshot.progress) {
-            EmptyView()
-        } currentValueLabel: {
-            Text(snapshot.number(snapshot.totalML))
-                .minimumScaleFactor(0.4)
-                .lineLimit(1)
-        }
-        .gaugeStyle(.accessoryCircularCapacity)
-        .tint(snapshot.tint)
-        .widgetAccentable()
-        .accessibilityLabel("Water today")
-        .accessibilityValue("\(snapshot.volume(snapshot.totalML)) of a \(snapshot.volume(snapshot.goalML)) goal")
+        Gauge(value: 0) { Image(systemName: "drop.fill") }
+            .gaugeStyle(.accessoryCircularCapacity)
+            .hidden()
+            .overlay { WaterRingView(snapshot: snapshot) }
     }
 }
 
