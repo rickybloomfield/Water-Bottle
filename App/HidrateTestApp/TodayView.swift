@@ -24,29 +24,26 @@ struct TodayView: View {
     var body: some View {
         @Bindable var app = app
         NavigationStack {
-            VStack(spacing: 0) {
+            TabView(selection: $selectedDay) {
+                ForEach(days, id: \.self) { day in
+                    DayContentView(day: day,
+                                   onOpen: { detail = $0 },
+                                   onDelete: { pendingDelete = $0 },
+                                   scrolledUnder: $scrolledUnder)
+                        .tag(day)
+                }
+            }
+            // The stock paged container: its drag has the rubber-banding and the
+            // part-way follow that a gesture of our own did not. It claims every
+            // sideways drag on the page, which is why the rows offer no swipe.
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            // The strip is part of the safe area rather than a sibling stacked above it.
+            // Stacking it left each page ending at the tab bar instead of the screen, and
+            // a list that stops short of the bar has nothing to scroll behind it.
+            .safeAreaInset(edge: .top, spacing: 0) {
                 DayTimeline(days: days, selected: $selectedDay, onPick: { day in
                     withAnimation(.snappy) { selectedDay = Calendar.current.startOfDay(for: day) }
                 }, scrolledUnder: scrolledUnder)
-                // Above the pages, so the line it casts falls on them.
-                .zIndex(1)
-                // The stock paged container: its drag has the rubber-banding and the
-                // part-way follow that a gesture of our own did not. It claims every
-                // sideways drag on the page, which is why the rows offer no swipe.
-                TabView(selection: $selectedDay) {
-                    ForEach(days, id: \.self) { day in
-                        DayContentView(day: day,
-                                       onOpen: { detail = $0 },
-                                       onDelete: { pendingDelete = $0 },
-                                       scrolledUnder: $scrolledUnder)
-                            .tag(day)
-                    }
-                }
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                // Down to the screen's edge, not the tab bar's. Each page is a list, and
-                // a list given the whole height insets its own content for the bar and
-                // lets the rest scroll behind it.
-                .ignoresSafeArea(.container, edges: .bottom)
             }
             // A day arrived at is at its top; only scrolling moves it from there.
             .onChange(of: selectedDay) { _, _ in scrolledUnder = 0 }

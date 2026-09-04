@@ -15,6 +15,7 @@ struct DayTimeline: View {
     /// Which day the strip has come to rest on. Kept apart from `selected` so a scroll
     /// settling and a page swipe can each drive the other without chasing their own tail.
     @State private var settledOn: Date?
+    @State private var isScrolling = false
 
     private var calendar: Calendar { .current }
 
@@ -36,9 +37,13 @@ struct DayTimeline: View {
             .scrollTargetBehavior(.viewAligned)
             .scrollPosition(id: $settledOn, anchor: .center)
             .onAppear { settledOn = selected }
-            .onChange(of: settledOn) { _, day in
-                guard let day, !calendar.isDate(day, inSameDayAs: selected) else { return }
-                onPick(day)
+            // Only once the strip has come to rest. The scroll position changes the whole
+            // way through a drag, and acting on each value it passes over changed the day
+            // several times before the finger had finished.
+            .onScrollSettled($isScrolling) { commitSettledDay() }
+            .onChange(of: settledOn) { _, _ in
+                guard !isScrolling else { return }
+                commitSettledDay()
             }
             .onChange(of: selected) { _, day in
                 guard settledOn.map({ !calendar.isDate($0, inSameDayAs: day) }) ?? true else { return }
@@ -59,6 +64,11 @@ struct DayTimeline: View {
                 .offset(y: 7)
                 .allowsHitTesting(false)
         }
+    }
+
+    private func commitSettledDay() {
+        guard let day = settledOn, !calendar.isDate(day, inSameDayAs: selected) else { return }
+        onPick(day)
     }
 
     private func chip(_ day: Date) -> some View {

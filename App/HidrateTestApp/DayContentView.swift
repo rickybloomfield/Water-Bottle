@@ -31,6 +31,8 @@ struct DayContentView: View {
         List {
             Section {
                 heroCard
+                    // Clear of the day strip above it.
+                    .padding(.top, 12)
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
