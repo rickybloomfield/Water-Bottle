@@ -435,23 +435,6 @@ public final class HidrateBottleModel {
         tracker.capacityML = calibration.capacityML
         let levelML = calibration.milliliters(forRaw: Double(raw))
 
-        // A bottle cannot hold less than nothing. Settled readings that keep coming in
-        // below empty mean the load cell's zero has moved, and until it is moved back
-        // every reading is discarded as "lifted" and nothing is ever logged.
-        if let threshold = autoRezeroBelowML, levelML < threshold {
-            belowEmptyStreak += 1
-            let since = belowEmptySince ?? date
-            belowEmptySince = since
-            if belowEmptyStreak >= autoRezeroSamples,
-               date.timeIntervalSince(since) >= autoRezeroMinimumSeconds {
-                rezero(toRaw: raw, automatic: true)
-                return
-            }
-        } else {
-            belowEmptyStreak = 0
-            belowEmptySince = nil
-        }
-
         // A below-empty reading means the bottle is lifted/tilted; don't anchor to it.
         let plausible = levelML >= tracker.configuration.liftedBelowML
         let baselineBefore = tracker.baselineML
@@ -482,10 +465,34 @@ public final class HidrateBottleModel {
             store?.saveLastLevel(tracker.baselineML ?? levelML, date: date)
         }
 
+        // A bottle cannot hold less than nothing, so settled readings that keep arriving
+        // below empty mean the zero has moved, and every one of them is being thrown away
+        // as "lifted" until it moves back.
+        //
+        // Only ever after the tracker has had the reading, and only when the tracker made
+        // nothing of it. Drift is what this is for; a drink is also a drop below empty
+        // when the bottle was already near empty, and re-zeroing on that would swallow it.
+        if change == nil { considerRezero(levelML: levelML, raw: raw, at: date) }
+
         guard let change, !change.isBaseline else { return }
         let event = LevelChangeEvent(id: UUID(), date: date, change: change, stableRaw: raw)
         levelChanges.insert(event, at: 0)
         onLevelChange?(event)
+    }
+
+    private func considerRezero(levelML: Double, raw: Int, at date: Date) {
+        guard let threshold = autoRezeroBelowML else { return }
+        guard levelML < threshold else {
+            belowEmptyStreak = 0
+            belowEmptySince = nil
+            return
+        }
+        belowEmptyStreak += 1
+        let since = belowEmptySince ?? date
+        belowEmptySince = since
+        guard belowEmptyStreak >= autoRezeroSamples,
+              date.timeIntervalSince(since) >= autoRezeroMinimumSeconds else { return }
+        rezero(toRaw: raw, automatic: true)
     }
 
     /// Returns true when it logged a recovered drink.

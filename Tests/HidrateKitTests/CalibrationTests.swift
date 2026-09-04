@@ -257,3 +257,29 @@ struct RezeroTests {
         #expect(abs(before - after) < 0.001)
     }
 }
+
+@Suite("Drinking from a near-empty bottle")
+struct NearEmptyTests {
+    /// The ordering that matters: a drop past the drink threshold is a drink even when it
+    /// lands below empty. Re-zeroing on it instead would swallow the drink whole.
+    @Test func aDropBelowEmptyIsStillADrink() {
+        var tracker = LevelTracker(capacityML: 621)
+        _ = tracker.ingest(levelML: 80)
+        let change = tracker.ingest(levelML: -40)
+        guard case .drink(let volume, _, _)? = change else {
+            Issue.record("expected a drink, got \(String(describing: change))")
+            return
+        }
+        #expect(abs(volume - 120) < 0.001)
+    }
+
+    /// Drift, by contrast, arrives in steps too small to be a drink and the tracker makes
+    /// nothing of them — which is the signal that the zero, not the water, has moved.
+    @Test func slowDriftBelowEmptyProducesNoChange() {
+        var tracker = LevelTracker(capacityML: 621)
+        _ = tracker.ingest(levelML: 10)
+        for level in stride(from: 5.0, through: -40.0, by: -5.0) {
+            #expect(tracker.ingest(levelML: level) == nil)
+        }
+    }
+}
