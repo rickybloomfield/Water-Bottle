@@ -486,6 +486,32 @@ final class AppState {
         }
     }
 
+    /// Correct a logged drink's amount or time.
+    ///
+    /// A Health sample can't be changed once written, so one that reached Health is
+    /// removed and rewritten. The entry keeps its id either way, which is what stops a
+    /// widget or watch drink being adopted a second time.
+    func update(_ entry: IntakeEntry, volumeML: Double, at date: Date) async {
+        guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+        if let uuid = entries[index].healthKitUUID {
+            do {
+                try await health.deleteWater(uuid: uuid)
+            } catch {
+                lastError = "HealthKit: \(error.localizedDescription)"
+                return
+            }
+            entries[index].healthKitUUID = nil
+        }
+        entries[index].volumeML = volumeML.rounded()
+        entries[index].date = date
+        entries[index].healthError = nil
+        sessionLog.write("edited \(Int(entries[index].volumeML))mL at \(Format.time.string(from: date))")
+        if autoLogToHealth, entries[index].volumeML >= minimumLogML {
+            await logToHealth(entries[index])
+        }
+        await refreshHealthTotal()
+    }
+
     func delete(_ entry: IntakeEntry) async {
         if let uuid = entry.healthKitUUID {
             do {

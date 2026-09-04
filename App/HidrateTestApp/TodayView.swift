@@ -6,6 +6,7 @@ struct TodayView: View {
     @State private var showManualAdd = false
     @State private var manualML = 8 * VolumeUnit.mlPerOunce
     @State private var pendingDelete: IntakeEntry?
+    @State private var editing: IntakeEntry?
 
     private var model: HidrateBottleModel { app.model }
 
@@ -38,6 +39,7 @@ struct TodayView: View {
             }
             .refreshable { await app.refreshHealthTotal() }
             .sheet(isPresented: $showManualAdd) { manualAddSheet }
+            .sheet(item: $editing) { EditDrinkView(entry: $0) }
             .overlay {
                 if app.showCelebration {
                     CelebrationView(isPresented: $app.showCelebration,
@@ -189,9 +191,22 @@ struct TodayView: View {
                 .foregroundStyle(entry.healthKitUUID == nil ? Color.secondary : Color.pink)
                 .font(.subheadline)
                 .accessibilityLabel(entry.healthKitUUID == nil ? "Not saved to Health" : "Saved to Health")
+            if entry.source.isHandLogged {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(.vertical, 4)
+        // Only what you typed in. A drink the bottle weighed is a measurement, and
+        // editing it would quietly disagree with the level the app is tracking.
+        .contentShape(Rectangle())
+        .onTapGesture { if entry.source.isHandLogged { editing = entry } }
+        .accessibilityHint(entry.source.isHandLogged ? "Double tap to edit" : "")
         .contextMenu {
+            if entry.source.isHandLogged {
+                Button("Edit", systemImage: "pencil") { editing = entry }
+            }
             if entry.healthKitUUID == nil {
                 Button("Save to Health", systemImage: "heart") { Task { await app.logToHealth(entry) } }
             }
@@ -226,21 +241,10 @@ struct TodayView: View {
         NavigationStack {
             Form {
                 Section {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 10) {
-                        ForEach(presets, id: \.self) { ml in
-                            Button {
-                                app.addManual(volumeML: ml)
-                                showManualAdd = false
-                            } label: {
-                                Text(app.volume(ml))
-                                    .font(.body.weight(.semibold))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 8)
-                            }
-                            .buttonStyle(.bordered)
-                        }
+                    VolumePresetGrid(unit: app.unit) { ml in
+                        app.addManual(volumeML: ml)
+                        showManualAdd = false
                     }
-                    .listRowInsets(EdgeInsets(top: 12, leading: 12, bottom: 12, trailing: 12))
                 } header: {
                     Text("Quick add")
                 } footer: {
@@ -270,6 +274,4 @@ struct TodayView: View {
         }
         .presentationDetents([.medium, .large])
     }
-
-    private var presets: [Double] { app.unit.presetsML }
 }

@@ -9,6 +9,9 @@ Talk to a HidrateSpark PRO water bottle directly over Bluetooth, without the off
 * **`App/HidrateTestApp`** (iOS): a daily-use hydration app. **Today** shows progress
   toward your goal and an animated bottle whose water sloshes with device tilt and
   ripples when tapped, draining as you drink, with a celebration when you hit the goal.
+  A drink you logged by hand — in the app, on the widget or on the watch — can be tapped
+  to correct its amount or its time; one the bottle weighed cannot, since editing a
+  measurement would quietly disagree with the level the app is tracking.
   **Progress** charts daily/weekly/monthly intake from Apple Health with streaks and
   stats. **Bottle** covers connection, hardware details, and calibration. **Settings**
   holds your goal, units (oz or mL), drink reminders, the bottle's drink light, Health
