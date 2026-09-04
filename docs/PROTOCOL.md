@@ -102,17 +102,33 @@ Behavioural notes on 100.64.0:
   ~40 s later, then at ~180 ms spacing. The bottle appears to service ATT requests only when
   it wakes, so keep reads to a minimum and never poll.
 * **Weight notifies every 15 s** regardless of activity (observed cadence 15.0 s).
-* **Scale**: an empty/full capture on the 21 oz PRO 2 read ≈ 24040 empty and ≈ 25644 full,
-  so about **2.6 raw units per mL** (double the PRO v1's 1.3).
+* **Scale**: about **1.4–1.6 raw units per mL** on the 21 oz PRO 2, in line with the PRO
+  v1's 1.3. Two independent derivations from the bottle's own sip records agree: the
+  captured frame below is 323 raw for 36% of 621 mL = 1.44, and the observed 9.5–10.5 raw
+  per percent works out at 1.53–1.69. A field calibration on this bottle came out at 1.38.
+  An earlier empty/full capture here read ≈ 24040 empty and ≈ 25644 full, which would be
+  2.6 raw/mL — roughly double everything else, so treat that capture as bad (most likely
+  the "empty" end was taken tilted or lifted, both of which read like empty) rather than
+  as evidence that this generation's scale differs.
 * **The sensor weighs the water on the base, not the bottle.** Pouring the bottle out or
   tilting it reads like "empty" (≈ 24040), not far below it, and lifting the bottle level
   changes little. Drink detection therefore cannot use a "lifted" floor and instead waits
   for readings to settle for ~15 s.
-* **Slow downward drift at rest**: ~15 units/min after unplugging from the charger, and
-  ~27 units/min for several minutes after a refill with tap water (25615 → 25471 over
-  5 min). Consistent with the puck cooling; not yet seen to flatten within a 10 minute
-  window. The tracker adopts drift between slow samples and only measures across handling
-  episodes, but the displayed absolute level will wander until this is understood.
+* **Slow drift at rest**, and it is creep after a change in load rather than a constant
+  bias. Measured across one morning's session log on an untouched bottle, it decayed
+  monotonically — −9.5 mL/min, −8.7, −5.8, −3.0 over fifty minutes, roughly halving every
+  forty — and it had been running *upward* at +3 mL/min before the bottle was emptied.
+  Earlier notes recorded ~15 units/min after unplugging from the charger and ~27
+  units/min for several minutes after a refill, which is the same effect at the start of
+  its decay. The total excursion can exceed the bottle's own span: one session wandered
+  900 raw units, about 650 mL, over two hours.
+
+  **This is why the bottle's own reporting is entirely differential** — a sip percent, a
+  running total that is a sum of those percents, and a weight pair per sip. Nothing in the
+  protocol reports how full the bottle is, and a client that derives that from raw weight
+  is fighting a number that moves by more than the bottle holds. Drinks are safe because
+  they are differences taken over seconds; an absolute level is only as fresh as its zero,
+  which is why `HidrateBottleModel` re-zeroes rather than asking for a recalibration.
 ### What the official app does (from an HCI sniff, 2026-09-03)
 
 An iPhone HCI capture of the official app talking to this PRO 2 settled every open question.
