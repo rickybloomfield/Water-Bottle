@@ -11,22 +11,37 @@ struct WaterRingView: View {
         // Drawn rather than left to a Gauge, so the ring carries the app's colour and the
         // pace marker. `widgetAccentable` puts it in the accent group, which is what a
         // watch face that tints its complications colours with the face's own colour.
-        HydrationRing(progress: snapshot.progress,
-                      overflow: snapshot.overflow,
-                      tint: snapshot.tint,
-                      paceMarker: snapshot.paceMarker(),
-                      // Measured off a photograph of a real watch face: every system
-                      // complication on it is a 45pt circle with a 5pt stroke.
-                      thickness: 5.0 / 45.0) {
-            Text(snapshot.number(snapshot.totalML))
-                .font(.system(size: 24, weight: .semibold, design: .rounded))
-                .minimumScaleFactor(0.4)
-                .lineLimit(1)
+        GeometryReader { proxy in
+            let side = min(proxy.size.width, proxy.size.height)
+            HydrationRing(progress: snapshot.progress,
+                          overflow: snapshot.overflow,
+                          tint: snapshot.tint,
+                          paceMarker: snapshot.paceMarker(),
+                          // Measured off a photograph of a real watch face: every system
+                          // complication on it is a 45pt circle with a 5pt stroke.
+                          thickness: 5.0 / 45.0) {
+                Text(snapshot.number(snapshot.totalML))
+                    // Sized for three digits and left there, rather than sized for the
+                    // ring and shrunk to fit. `minimumScaleFactor` only ever shrinks, so a
+                    // font big enough to need it at 103 did not need it at 52, and the
+                    // number changed size as the day went on. The temperature in Weather's
+                    // circle does not do that, and neither does this now.
+                    .font(.system(size: side * Self.numberFraction, weight: .semibold, design: .rounded))
+                    // Still a floor under it, for a four-digit millilitre total.
+                    .minimumScaleFactor(0.6)
+                    .lineLimit(1)
+            }
         }
+        .aspectRatio(1, contentMode: .fit)
         .widgetAccentable()
         .accessibilityLabel("Water today")
         .accessibilityValue("\(snapshot.volume(snapshot.totalML)) of a \(snapshot.volume(snapshot.goalML)) goal")
     }
+
+    /// Of the ring's diameter. Three rounded digits at this size span the widest chord
+    /// they can use inside a 45pt circle with a 5pt stroke, which is the size the
+    /// complication draws at.
+    private static let numberFraction: CGFloat = 0.40
 }
 
 /// The accessoryCircular family: our ring, at a gauge's size.

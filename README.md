@@ -87,6 +87,11 @@ you're on track, behind it you're falling back. The complication has no room for
 the number alone; whether that number is ounces or millilitres follows the app's setting. The phone spends a budgeted
 complication transfer only when the number on the face would actually change.
 
+The number inside a ring is sized for three digits and left there, rather than sized for
+the ring and shrunk to fit: `minimumScaleFactor` only ever shrinks, so a font big enough to
+need it at 103 did not need it at 52, and the number grew and shrank as the day went on.
+The temperature in Weather's circle holds still, and so does this.
+
 The home-screen sizes are dark whatever the phone's appearance, to sit with the widgets
 they sit among. The lock-screen sizes are left to the system, which renders those itself.
 

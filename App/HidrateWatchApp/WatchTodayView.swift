@@ -44,10 +44,12 @@ struct WatchTodayView: View {
                     WKInterfaceDevice.current().play(.click)
                 } label: {
                     Text(snapshot.volume(ml))
-                        .font(.footnote.weight(.semibold))
+                        // Bigger than a footnote: these are the app's only controls, and
+                        // they are read at arm's length with a wrist half-turned.
+                        .font(.system(size: 17, weight: .semibold, design: .rounded))
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
-                        .frame(maxWidth: .infinity, minHeight: 34)
+                        .frame(maxWidth: .infinity, minHeight: 38)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.blue.opacity(0.35))

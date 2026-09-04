@@ -74,7 +74,9 @@ struct QuickAddWidgetView: View {
                             .minimumScaleFactor(0.7)
                             .frame(maxWidth: .infinity, minHeight: 38)
                             .background(Color.blue.opacity(0.22), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                            .foregroundStyle(Color.blue)
+                            // White rather than the blue of the fill behind it: blue on
+                            // blue at this size is hard to read on a home screen.
+                            .foregroundStyle(.white)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Log \(snapshot.volume(ml))")
