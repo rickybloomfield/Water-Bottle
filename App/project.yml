@@ -48,6 +48,8 @@ targets:
       path: HidrateTestApp/Info.plist
       properties:
         CFBundleDisplayName: Hydration
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSBluetoothAlwaysUsageDescription: Connects to your HidrateSpark bottle to read its water level and sips.
@@ -63,7 +65,7 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_STRICT_CONCURRENCY: complete
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "4"
+        CURRENT_PROJECT_VERSION: "5"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
 
   HidrateWidgets:
@@ -81,6 +83,8 @@ targets:
       path: HidrateWidgets/Info.plist
       properties:
         CFBundleDisplayName: Hydration
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
@@ -89,7 +93,7 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_STRICT_CONCURRENCY: complete
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "4"
+        CURRENT_PROJECT_VERSION: "5"
 
   HidrateWatchApp:
     type: application
@@ -112,6 +116,8 @@ targets:
       path: HidrateWatchApp/Info.plist
       properties:
         CFBundleDisplayName: Hydration
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.rickybloomfield.HidrateTestApp
     settings:
@@ -120,7 +126,7 @@ targets:
         TARGETED_DEVICE_FAMILY: "4"
         SWIFT_STRICT_CONCURRENCY: complete
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "4"
+        CURRENT_PROJECT_VERSION: "5"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
 
   HidrateWatchWidgets:
@@ -138,6 +144,8 @@ targets:
       path: HidrateWatchWidgets/Info.plist
       properties:
         CFBundleDisplayName: Hydration
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
@@ -146,4 +154,4 @@ targets:
         TARGETED_DEVICE_FAMILY: "4"
         SWIFT_STRICT_CONCURRENCY: complete
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "4"
+        CURRENT_PROJECT_VERSION: "5"
