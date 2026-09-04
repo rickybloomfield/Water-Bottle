@@ -18,14 +18,12 @@ Talk to a HidrateSpark PRO water bottle directly over Bluetooth, without the off
 
 ## The water
 
-The bottle on the Today tab holds a real fluid simulation, not an animation: a 2D
-Position-Based Fluids solver (Macklin & Müller) with incompressibility enforced like water,
-driven by the device's actual gravity vector at 9.81 m/s² scaled to the bottle's real
-dimensions, and water-like viscosity. It pools against whichever wall is down, sloshes,
-splashes when tapped, and drains or pours as the level changes. The vessel walls come
-from a signed-distance field of the drawn silhouette, and the particles render as one
-liquid through a metaball filter. A headless harness (see `docs/PHYSICS.md`) checks
-containment, density error, surface flatness, and behaviour at 90° and 180°.
+The bottle on the Today tab holds an animated water surface: a one-dimensional
+heightfield whose columns are coupled to their neighbours (so ripples travel), pulled
+toward an equilibrium that follows the device's real gravity vector, and damped. The
+surface stays perpendicular to gravity and preserves volume at any angle, so turning the
+phone pools the water against the side or the cap, tapping ripples it, and it drains
+smoothly as you drink. It's a stylised model tuned to feel like water, not a fluid solver.
 
 ## Quick start (iOS app)
 
