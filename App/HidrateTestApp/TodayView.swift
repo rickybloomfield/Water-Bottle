@@ -157,6 +157,10 @@ struct TodayView: View {
                                 Button(role: .destructive) { pendingDelete = entry } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
+                                // A destructive role is red by default, but the app tints
+                                // itself blue and a swipe action takes the tint it
+                                // inherits, which left the delete button blue.
+                                .tint(.red)
                             }
                     case .health(let sample):
                         healthRow(sample)
