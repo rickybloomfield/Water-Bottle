@@ -290,7 +290,9 @@ final class AppState {
             forName: UIApplication.protectedDataDidBecomeAvailableNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.reloadPersistedBottleState() }
+            // Hop rather than assert: an isolation check that fails is a crash, and this
+            // is not worth crashing over. (The watch app crashed on exactly that.)
+            Task { @MainActor in self?.reloadPersistedBottleState() }
         }
         model.reconnectLastBottle()
         startHealthObserver()

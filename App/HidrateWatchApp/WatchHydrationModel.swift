@@ -76,8 +76,13 @@ private final class WatchPhoneLink: NSObject {
         let session = WCSession.default
         session.transferUserInfo(payload)
         guard session.isReachable else { return }
-        session.sendMessage(payload, replyHandler: { [weak self] reply in
-            Task { @MainActor in self?.deliver(reply) }
+        // `@Sendable` matters: written bare inside a @MainActor type, the closure is
+        // inferred main-actor isolated, and WatchConnectivity calls it back on its own
+        // operation queue — which trips the isolation check and traps. Decode here, hop
+        // with the value.
+        session.sendMessage(payload, replyHandler: { @Sendable [weak self] reply in
+            guard let snapshot = WatchMessage.decode(HydrationSnapshot.self, from: reply, key: WatchMessage.snapshotKey) else { return }
+            Task { @MainActor in self?.onSnapshot?(snapshot) }
         }, errorHandler: nil)
     }
 
@@ -87,8 +92,9 @@ private final class WatchPhoneLink: NSObject {
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         guard session.activationState == .activated, session.isReachable else { return }
-        session.sendMessage([WatchMessage.requestKey: true], replyHandler: { [weak self] reply in
-            Task { @MainActor in self?.deliver(reply) }
+        session.sendMessage([WatchMessage.requestKey: true], replyHandler: { @Sendable [weak self] reply in
+            guard let snapshot = WatchMessage.decode(HydrationSnapshot.self, from: reply, key: WatchMessage.snapshotKey) else { return }
+            Task { @MainActor in self?.onSnapshot?(snapshot) }
         }, errorHandler: nil)
     }
 
