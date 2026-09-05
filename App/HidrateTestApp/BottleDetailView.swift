@@ -21,10 +21,10 @@ struct BottleDetailView: View {
     var body: some View {
         List {
             if let bottle {
-                statusSection(bottle)
+                heroSection(bottle)
+                trustSection(bottle)
+                activitySection
                 nameSection
-                levelSection(bottle)
-                calibrationSection(bottle)
                 aboutSection(bottle)
                 forgetSection(bottle)
                 actionSection(bottle)
@@ -39,32 +39,154 @@ struct BottleDetailView: View {
         } message: { Text(rezeroMessage ?? "") }
     }
 
-    // MARK: - Status
+    // MARK: - Hero
 
-    private func statusSection(_ bottle: SavedBottle) -> some View {
-        Section {
-            HStack(spacing: 14) {
-                Image(systemName: "waterbottle.fill")
-                    .font(.title2)
-                    .foregroundStyle(isConnected ? Color.blue : Color.secondary)
-                    .frame(width: 44, height: 44)
-                    .background(
-                        (isConnected ? Color.blue : Color.secondary).opacity(0.12),
-                        in: RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    )
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(statusTitle).font(.headline)
-                    Text(statusDetail).font(.subheadline).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 8)
-                if isConnected, let battery = model.batteryPercent {
-                    Label("\(battery)%", systemImage: batterySymbol(battery))
-                        .font(.subheadline)
+    /// What is in the bottle, whether we are still hearing from it, and whether to
+    /// believe it — the three things that decide if the rest of the screen means
+    /// anything, said before any of the rest of it.
+    private func heroSection(_ bottle: SavedBottle) -> some View {
+        let reading = reading(for: bottle)
+        return Section {
+            HStack(spacing: 20) {
+                BottleGlyph(fill: reading?.fraction)
+                    .frame(width: 72, height: 142)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(reading.map { app.volume($0.level) } ?? "—")
+                        .font(.system(size: 34, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                    if let reading, let capacity = capacityML(bottle) {
+                        Text("of \(app.volume(capacity)) · \(Int((reading.fraction * 100).rounded()))% full")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else if reading == nil {
+                        Text(calibration(for: bottle) == nil ? "Not calibrated yet" : "No steady reading yet")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 6) {
+                        Circle().fill(statusDotColour).frame(width: 8, height: 8)
+                        Text(statusTitle)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(isConnected ? Color.green : Color.secondary)
+                    }
+                    .padding(.top, 6)
+                    Text(lastReadingLine(bottle))
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
-                        .labelStyle(.titleAndIcon)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 6)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private var statusDotColour: Color {
+        guard isActive else { return .secondary }
+        if model.isConnected { return .green }
+        if case .connecting = model.connectionState { return .orange }
+        return .secondary
+    }
+
+    private func capacityML(_ bottle: SavedBottle) -> Double? {
+        if let capacity = bottle.capacityML { return Double(capacity) }
+        return calibration(for: bottle).map(\.capacityML)
+    }
+
+    /// When we last heard from the scale, and whether the level we are showing still
+    /// matches what the scale itself says.
+    private func lastReadingLine(_ bottle: SavedBottle) -> String {
+        guard isActive, let sample = model.latestWeight else { return statusDetail }
+        let time = sample.receivedAt.formatted(date: .omitted, time: .shortened)
+        guard let level = model.displayLevelML, let scale = model.clampedLevelML else {
+            return "Last reading \(time)"
+        }
+        return abs(scale - level) < 20
+            ? "Last reading \(time) · agrees with the scale"
+            : "Last reading \(time) · scale reads \(app.volume(scale))"
+    }
+
+    // MARK: - Trust
+
+    /// Calibration, the zero, and the battery: the three things that go wrong, each said
+    /// plainly enough to act on.
+    @ViewBuilder
+    private func trustSection(_ bottle: SavedBottle) -> some View {
+        Section {
+            calibrationRow(bottle)
+            if isConnected { rezeroButton }
+            if isConnected, let battery = model.batteryPercent {
+                LabeledContent {
+                    Text("\(battery)%")
+                } label: {
+                    trustLabel("Battery", detail: nil, symbol: batterySymbol(battery), tint: .blue)
                 }
             }
-            .padding(.vertical, 4)
+            if isConnected { driftNotices }
+        }
+    }
+
+    @ViewBuilder
+    private func calibrationRow(_ bottle: SavedBottle) -> some View {
+        let calibrated = calibration(for: bottle)
+        let label = trustLabel(
+            calibrated.map { "Calibrated \($0.calibratedAt.formatted(.relative(presentation: .named)))" } ?? "Not calibrated",
+            detail: calibrated == nil
+                ? "The app can't read a level until it knows empty and full."
+                : "Empty and full both captured",
+            symbol: calibrated == nil ? "exclamationmark.triangle.fill" : "checkmark.circle.fill",
+            tint: calibrated == nil ? .orange : .green
+        )
+        if isConnected {
+            NavigationLink { CalibrationView() } label: { label }
+        } else {
+            label
+        }
+    }
+
+    private func trustLabel(_ title: String, detail: String?, symbol: String, tint: Color) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol)
+                .font(.subheadline)
+                .foregroundStyle(tint)
+                .frame(width: 32, height: 32)
+                .background(tint.opacity(0.14), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                if let detail {
+                    Text(detail).font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    // MARK: - Recent activity
+
+    /// Every reading the app acted on, newest first, in language you can read.
+    @ViewBuilder
+    private var activitySection: some View {
+        let recent = Array(app.entries.sorted { $0.date > $1.date }.prefix(5))
+        if !recent.isEmpty {
+            Section("Recent activity") {
+                ForEach(recent) { entry in
+                    HStack(spacing: 12) {
+                        Text(entry.date.formatted(date: .omitted, time: .shortened))
+                            .font(.footnote.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 72, alignment: .leading)
+                        Text("\(entry.approximate ? "Estimated" : "Logged") \(app.volume(entry.volumeML))")
+                            .font(.subheadline)
+                        Spacer(minLength: 8)
+                        Image(systemName: entry.healthKitUUID == nil ? "circle.dashed" : "checkmark.circle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(entry.healthKitUUID == nil ? Color.secondary : Color.green)
+                            .accessibilityLabel(entry.healthKitUUID == nil ? "Not in Health" : "In Health")
+                    }
+                }
+            }
         }
     }
 
@@ -113,46 +235,6 @@ struct BottleDetailView: View {
         guard let bottle else { return }
         let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
         app.rename(bottle, to: trimmed == bottle.name ? "" : trimmed)
-    }
-
-    // MARK: - Water level
-
-    @ViewBuilder
-    private func levelSection(_ bottle: SavedBottle) -> some View {
-        Section("Water level") {
-            if let reading = reading(for: bottle) {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(isConnected ? "In the bottle" : "Last reading")
-                        Spacer()
-                        Text("\(app.volume(reading.level)) · \(Int((reading.fraction * 100).rounded()))%")
-                            .font(.body.weight(.semibold))
-                            .monospacedDigit()
-                    }
-                    ProgressView(value: reading.fraction).tint(.blue)
-                }
-                .padding(.vertical, 2)
-
-                if isConnected {
-                    if let level = model.displayLevelML, let scale = model.clampedLevelML,
-                       abs(scale - level) >= 20 {
-                        // The scale's own answer, for when the two have parted company.
-                        LabeledContent("Scale reads", value: app.volume(scale))
-                            .foregroundStyle(.secondary)
-                    }
-                    driftNotices
-                    rezeroButton
-                }
-            } else if calibration(for: bottle) == nil {
-                Label("Calibrate to see the water level", systemImage: "scalemass")
-                    .foregroundStyle(.orange)
-            } else if isConnected {
-                Label("Waiting for a steady reading. Set the bottle on a flat surface.", systemImage: "hourglass")
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Connect this bottle to read its level.").foregroundStyle(.secondary)
-            }
-        }
     }
 
     /// The live level for the bottle in use; the last one saved for any other.
@@ -204,39 +286,6 @@ struct BottleDetailView: View {
             Label("Bottle is empty — set the zero", systemImage: "scalemass")
         }
         .disabled(model.stableRaw == nil)
-    }
-
-    // MARK: - Calibration
-
-    @ViewBuilder
-    private func calibrationSection(_ bottle: SavedBottle) -> some View {
-        Section {
-            if isConnected {
-                NavigationLink {
-                    CalibrationView()
-                } label: {
-                    LabeledContent("Calibration") {
-                        if let calibration = calibration(for: bottle) {
-                            Text(calibration.calibratedAt.formatted(date: .abbreviated, time: .omitted))
-                        } else {
-                            Text("Not yet").foregroundStyle(.orange)
-                        }
-                    }
-                }
-            } else {
-                LabeledContent("Calibration") {
-                    if let calibration = calibration(for: bottle) {
-                        Text(calibration.calibratedAt.formatted(date: .abbreviated, time: .omitted))
-                    } else {
-                        Text("Not yet").foregroundStyle(.orange)
-                    }
-                }
-            }
-        } footer: {
-            Text(isConnected
-                 ? "Calibration teaches the app what empty and full look like on this bottle."
-                 : "Connect this bottle to calibrate it.")
-        }
     }
 
     // MARK: - About

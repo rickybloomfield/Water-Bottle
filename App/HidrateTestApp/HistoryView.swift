@@ -50,8 +50,8 @@ struct HistoryView: View {
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Progress")
+            // Reloaded whenever a drink lands; the pull gesture had nothing to add.
             .task(id: app.entriesRevision) { await load() }
-            .refreshable { await load() }
         }
     }
 
@@ -110,16 +110,11 @@ struct HistoryView: View {
         let last7 = (0..<7).compactMap { cal.date(byAdding: .day, value: -$0, to: today) }.map { daily[$0] ?? 0 }
         s.sevenDayAverageML = last7.reduce(0, +) / 7
         if let best = daily.max(by: { $0.value < $1.value }) { s.bestDayML = best.value; s.bestDay = best.key }
-        // Streak: consecutive days at goal ending today (or yesterday if today isn't done).
-        var day = today
-        if (daily[day] ?? app.todayTotalML) < app.dailyGoalML { day = cal.date(byAdding: .day, value: -1, to: day) ?? day }
-        while (daily[day] ?? 0) >= app.dailyGoalML, app.dailyGoalML > 0 {
-            s.streak += 1
-            guard let prev = cal.date(byAdding: .day, value: -1, to: day) else { break }
-            day = prev
-        }
+        // The one the app keeps, not a second opinion worked out from this screen's own
+        // shorter window — that is how the two tabs came to disagree.
+        s.streak = app.streakDays
         s.goalDaysLast30 = (0..<30).compactMap { cal.date(byAdding: .day, value: -$0, to: today) }
-            .filter { (daily[$0] ?? 0) >= app.dailyGoalML && app.dailyGoalML > 0 }.count
+            .filter { app.unit.reachedGoal(daily[$0] ?? 0, goalML: app.dailyGoalML) }.count
         let drinks = app.entries.filter { $0.source != .manual }
         s.averageDrinkML = drinks.isEmpty ? 0 : drinks.reduce(0) { $0 + $1.volumeML } / Double(drinks.count)
         s.drinksToday = app.todayEntries.count
@@ -211,7 +206,8 @@ struct HistoryView: View {
                     x: .value("Period", b.start, unit: calendarUnit),
                     y: .value("Water", app.unit.value(fromML: b.averagePerDayML))
                 )
-                .foregroundStyle(b.averagePerDayML >= app.dailyGoalML ? Color.blue : Color.blue.opacity(0.45))
+                .foregroundStyle(app.unit.reachedGoal(b.averagePerDayML, goalML: app.dailyGoalML)
+                                 ? Color.blue : Color.blue.opacity(0.45))
                 .cornerRadius(6)
                 .opacity(selectedBucket == nil || selectedBucket == b ? 1 : 0.5)
             }

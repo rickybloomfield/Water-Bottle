@@ -52,4 +52,19 @@ enum VolumeUnit: String, CaseIterable, Identifiable, Codable, Sendable {
 
     /// Just the number, for big hero displays and the watch complication.
     func number(_ ml: Double) -> String { format(ml, showUnit: false) }
+
+    /// Half a display step: the most a figure can be rounded up by on its way to the
+    /// screen. An ounce is shown to a tenth, a millilitre to the whole.
+    private var displayToleranceML: Double { self == .ounces ? Self.mlPerOunce * 0.05 : 0.5 }
+
+    /// Whether `totalML` counts as reaching `goalML`.
+    ///
+    /// Compared with half a display step of slack rather than exactly. A total is the sum
+    /// of drinks that were each rounded on the way in, so a day reading "88 oz" against an
+    /// "88 oz" goal can sit a millilitre short of it. Drawing that day as missed
+    /// contradicts the number printed beside it, which is the one thing a goal ring must
+    /// never do.
+    func reachedGoal(_ totalML: Double, goalML: Double) -> Bool {
+        goalML > 0 && totalML >= goalML - displayToleranceML
+    }
 }

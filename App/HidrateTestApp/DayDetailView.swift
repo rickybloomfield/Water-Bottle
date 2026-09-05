@@ -16,9 +16,10 @@ struct DayDetailView: View {
     @State private var addingDrink = false
 
     var body: some View {
-        DayContentView(day: day,
-                       onOpen: { detail = $0 },
-                       onDelete: { pendingDelete = $0 })
+        DayScreen(day: day,
+                  onOpen: { detail = $0 },
+                  onDelete: { pendingDelete = $0 },
+                  onMore: { addingDrink = true })
             .navigationTitle(DayTimeline.label(day))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -42,8 +43,9 @@ struct DayDetailView: View {
     }
 }
 
-/// Log a drink onto a day that isn't today. The time starts at this time of day, which is
-/// as good a guess as any and can be corrected in the drink itself afterwards.
+/// Log a drink. The amounts at the top are the whole screen for most drinks — tap one and
+/// it is logged and gone. Everything below is the fallback for an amount that isn't on
+/// the list, or a time that isn't now.
 struct AddDrinkView: View {
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
@@ -59,20 +61,21 @@ struct AddDrinkView: View {
         _volumeML = State(initialValue: volumeML)
     }
 
+    private var isToday: Bool { Calendar.current.isDateInToday(day) }
+
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     // Tapping an amount logs it, as the Today tab's plus button always
-                    // has; the stepper below is for anything not on the list.
+                    // has; everything below is for anything not on the list.
                     VolumePresetGrid(unit: app.unit, selected: volumeML) { ml in
                         app.addManual(volumeML: ml, at: onDay(time))
                         dismiss()
                     }
-                } header: {
-                    Text("Amount")
+                    .listRowBackground(Color.clear)
                 } footer: {
-                    Text("Tap an amount to log it right away.")
+                    Text("Tapping an amount logs it and closes. Everything below is for anything else.")
                 }
                 Section {
                     Stepper(value: $volumeML, in: app.unit.drinkStepML...1500, step: app.unit.drinkStepML) {
@@ -84,23 +87,35 @@ struct AddDrinkView: View {
                     }
                     DatePicker("Time", selection: $time, displayedComponents: .hourAndMinute)
                 }
+                Section {
+                    Button {
+                        app.addManual(volumeML: volumeML, at: onDay(time))
+                        dismiss()
+                    } label: {
+                        Text("Log \(app.volume(volumeML)) at \(time.formatted(date: .omitted, time: .shortened))")
+                            .font(.body.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 4)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                }
             }
-            .navigationTitle("Add a drink")
+            .navigationTitle(isToday ? "Log a drink" : "Add a drink")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") {
-                        app.addManual(volumeML: volumeML, at: onDay(time))
-                        dismiss()
-                    }
-                }
             }
         }
         .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
         .presentationBackground(.regularMaterial)
     }
 
+    /// The chosen time of day, on the day being added to.
     private func onDay(_ time: Date) -> Date {
         let calendar = Calendar.current
         let hm = calendar.dateComponents([.hour, .minute], from: time)

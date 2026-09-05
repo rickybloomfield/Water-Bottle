@@ -95,6 +95,8 @@ final class AppState {
             entriesRevision &+= 1
             saveEntries()
             publishSnapshot()
+            // Not just today's: correcting a day last week can join two runs together.
+            refreshStreakSoon()
         }
     }
     /// Bumped on every change to `entries`. Screens that hold a snapshot of a day watch
@@ -153,6 +155,8 @@ final class AppState {
         didSet {
             defaults.set(unit.rawValue, forKey: Keys.unit)
             publishSnapshot()
+            // The unit decides how close counts as reached, which can change a streak.
+            refreshStreakSoon()
             Task { await rescheduleReminders() }
         }
     }
@@ -160,6 +164,8 @@ final class AppState {
         didSet {
             defaults.set(dailyGoalML, forKey: Keys.goal)
             publishSnapshot()
+            // Which days count as reached moves with the goal, so the streak does too.
+            refreshStreakSoon()
             Task { await rescheduleReminders() }
         }
     }
@@ -353,6 +359,7 @@ final class AppState {
         // rather than whatever the defaults happen to be.
         publishSnapshot(force: true)
         Task { await refreshHealthTotal() }
+        refreshStreakSoon()
     }
 
     /// Re-read the calibration and level saved on disk if the launch came up without
@@ -671,7 +678,7 @@ final class AppState {
     /// How far round a second lap of the ring, once the goal is beaten.
     var goalOverflow: Double { dailyGoalML > 0 ? min(max(todayTotalML / dailyGoalML - 1, 0), 1) : 0 }
     var remainingML: Double { max(dailyGoalML - todayTotalML, 0) }
-    var goalReachedToday: Bool { todayTotalML >= dailyGoalML && dailyGoalML > 0 }
+    var goalReachedToday: Bool { unit.reachedGoal(todayTotalML, goalML: dailyGoalML) }
 
     // MARK: - Pace
 
@@ -686,6 +693,53 @@ final class AppState {
         guard !goalReachedToday else { return nil }
         let fraction = reminders.paceFraction()
         return fraction > 0 && fraction < 1 ? fraction : nil
+    }
+
+    /// Consecutive days at goal ending today. Reads the same daily totals Progress does,
+    /// so the streak on Today and the streak on Progress are the same number.
+    ///
+    /// Cached rather than computed per screen: working it out means a long Health query,
+    /// and the Today tab has a page per day, each of which would otherwise run its own.
+    private(set) var streakDays = 0
+
+    /// How far back a streak is looked for. Long enough that nobody reaches the end of it.
+    private static let streakLookbackDays = 400
+    private var streakTask: Task<Void, Never>?
+
+    /// Ask for a new streak. Coalesced, because a burst of sips would otherwise each
+    /// start their own long Health query.
+    func refreshStreakSoon() {
+        streakTask?.cancel()
+        streakTask = Task { [weak self] in await self?.refreshStreak() }
+    }
+
+    func refreshStreak(calendar: Calendar = .current) async {
+        let totals = await dailyTotals(days: Self.streakLookbackDays, calendar: calendar)
+        guard !Task.isCancelled else { return }
+        streakDays = TodayFacts.streak(in: totals, goalML: dailyGoalML,
+                                       todayTotalML: todayTotalML, unit: unit,
+                                       calendar: calendar)
+    }
+
+    /// Everything either Today screen needs about today. `streak` is passed in because it
+    /// costs a Health query, so the screen loads it once and keeps it.
+    func todayFacts(streak: Int, items: [TodayItem]) -> TodayFacts {
+        let entries = items.compactMap { item -> IntakeEntry? in
+            if case .entry(let entry) = item { return entry }
+            return nil
+        }
+        return TodayFacts(totalML: todayTotalML,
+                          goalML: dailyGoalML,
+                          unit: unit,
+                          paceTargetML: paceTargetML,
+                          paceFraction: reminders.paceFraction(),
+                          windowStartMinutes: reminders.startMinutes,
+                          windowEndMinutes: reminders.endMinutes,
+                          streak: streak,
+                          drinkCount: items.count,
+                          // Drinks read back out of Health are already in it by
+                          // definition; only the app's own can have failed to land.
+                          allInHealth: healthAuthorized && entries.allSatisfy { $0.healthKitUUID != nil })
     }
 
     private static let dayKeyFormatter: DateFormatter = {

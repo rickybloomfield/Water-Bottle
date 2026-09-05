@@ -42,6 +42,7 @@ extension AppState {
     func catchUp() async {
         adoptPendingDrinks()
         await refreshHealthTotal()
+        await refreshStreak()
         publishSnapshot()
     }
 

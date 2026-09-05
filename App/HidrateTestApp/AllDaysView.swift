@@ -1,8 +1,18 @@
 import HidrateKit
 import SwiftUI
 
-/// Every day there is anything to show, newest first, grouped by month. Open one to see
-/// what it holds and to put right what it doesn't.
+/// Every month there is anything to show, newest first, drawn as a month rather than
+/// listed as days. Open one to see what it holds and to put right what it doesn't.
+///
+/// The rings are the point: a list could say what each day was, one row at a time, but
+/// only a month laid out as a month shows a run of them at a glance.
+/// A day the grid has been asked to open. `Date` alone can't drive a navigation
+/// destination, which wants something identifiable.
+private struct OpenedDay: Identifiable, Hashable {
+    let date: Date
+    var id: Date { date }
+}
+
 struct AllDaysView: View {
     @Environment(AppState.self) private var app
 
@@ -17,8 +27,12 @@ struct AllDaysView: View {
     /// How far back Health has been asked so far. Grows a season at a time as the list
     /// is scrolled, rather than reading years nobody looks at on the way in.
     @State private var lookbackDays = 120
+    /// Set when Days is presented as a sheet, which needs a way out; pushed, it does not.
+    var onDone: (() -> Void)?
+
     @State private var loading = false
     @State private var loadedOnce = false
+    @State private var opened: OpenedDay?
 
     private static let pageDays = 180
     private static let minimumDays = 30
@@ -26,11 +40,19 @@ struct AllDaysView: View {
     var body: some View {
         List {
             ForEach(months, id: \.self) { month in
-                Section(month.formatted(.dateTime.month(.wide).year())) {
-                    ForEach(days(in: month), id: \.self) { day in
-                        NavigationLink { DayDetailView(day: day, listedTotalML: total(day)) } label: { row(day) }
-                    }
+                Section {
+                    monthCard(month)
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 }
+            }
+            Section {
+                Text("Tap a day to open it. A ring shows how close it came; a solid green ring made goal.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             }
             if hasMore {
                 Section {
@@ -39,7 +61,7 @@ struct AllDaysView: View {
                         if loading {
                             ProgressView()
                         } else {
-                            Button("Load earlier days") { Task { await loadMore() } }
+                            Button("Load earlier months") { Task { await loadMore() } }
                         }
                         Spacer()
                     }
@@ -49,9 +71,15 @@ struct AllDaysView: View {
                 .listRowBackground(Color.clear)
             }
         }
+        .listStyle(.insetGrouped)
+        .contentMargins(.top, 8, for: .scrollContent)
+        .listSectionSpacing(16)
         .navigationTitle("Days")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if let onDone {
+                ToolbarItem(placement: .topBarLeading) { Button("Done", action: onDone) }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Picker("Show", selection: $filter) {
@@ -65,7 +93,7 @@ struct AllDaysView: View {
             }
         }
         .overlay {
-            if visibleDays.isEmpty, loadedOnce {
+            if months.isEmpty, loadedOnce {
                 ContentUnavailableView {
                     Label(filter == .missed ? "No missed days" : "Nothing yet", systemImage: "checkmark.circle")
                 } description: {
@@ -82,6 +110,9 @@ struct AllDaysView: View {
         // Health may have moved underneath us anyway.
         .onAppear { Task { await load() } }
         .refreshable { await load() }
+        .navigationDestination(item: $opened) { opened in
+            DayDetailView(day: opened.date, listedTotalML: total(opened.date))
+        }
     }
 
     // MARK: - Loading
@@ -127,25 +158,47 @@ struct AllDaysView: View {
         return toEarliest >= lookbackDays
     }
 
-    private var visibleDays: [Date] {
-        switch filter {
-        case .all: allDays
-        // Today is still running, so it hasn't missed anything yet.
-        case .missed: allDays.filter { !calendar.isDateInToday($0) && !reachedGoal($0) }
-        }
-    }
-
     private var months: [Date] {
         var seen: [Date] = []
-        for day in visibleDays {
+        for day in allDays {
             guard let start = calendar.dateInterval(of: .month, for: day)?.start else { continue }
             if seen.last != start { seen.append(start) }
         }
         return seen
     }
 
-    private func days(in month: Date) -> [Date] {
-        visibleDays.filter { calendar.dateInterval(of: .month, for: $0)?.start == month }
+    @ViewBuilder private func monthCard(_ month: Date) -> some View {
+        let grid = MonthGrid(month: month,
+                             totals: totalsForGrid,
+                             goalML: app.dailyGoalML,
+                             unit: app.unit,
+                             dimReached: filter == .missed,
+                             onPick: { opened = OpenedDay(date: $0) })
+        VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(month.formatted(.dateTime.month(.wide).year()))
+                    .font(.body.weight(.semibold))
+                Spacer(minLength: 8)
+                Text(grid.summary)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .padding(.bottom, 14)
+            grid
+        }
+        .padding(18)
+        .background(Color(.secondarySystemGroupedBackground),
+                    in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    /// Today's live total laid over the figures read back, so the current day's ring
+    /// agrees with the Today tab.
+    private var totalsForGrid: [Date: Double] {
+        var totals = daily
+        totals[today] = app.todayTotalML
+        return totals
     }
 
     private func total(_ day: Date) -> Double {
@@ -154,32 +207,6 @@ struct AllDaysView: View {
     }
 
     private func reachedGoal(_ day: Date) -> Bool {
-        app.dailyGoalML > 0 && total(day) >= app.dailyGoalML
-    }
-
-    private func row(_ day: Date) -> some View {
-        let ml = total(day)
-        let reached = reachedGoal(day)
-        return HStack(spacing: 14) {
-            Image(systemName: reached ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(reached ? Color.green : Color.secondary.opacity(0.5))
-                .font(.title3)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label(day)).font(.body.weight(.medium))
-                Text(day.formatted(.dateTime.day().month(.abbreviated)))
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Text(ml > 0 ? app.volume(ml) : "—")
-                .font(.body.monospacedDigit())
-                .foregroundStyle(ml > 0 ? .primary : .secondary)
-        }
-        .padding(.vertical, 2)
-    }
-
-    private func label(_ day: Date) -> String {
-        if calendar.isDateInToday(day) { return "Today" }
-        if calendar.isDateInYesterday(day) { return "Yesterday" }
-        return day.formatted(.dateTime.weekday(.wide))
+        app.unit.reachedGoal(total(day), goalML: app.dailyGoalML)
     }
 }

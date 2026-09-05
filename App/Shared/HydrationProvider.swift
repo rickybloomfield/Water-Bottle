@@ -21,12 +21,25 @@ struct HydrationProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<HydrationEntry>) -> Void) {
         let now = Date()
-        let entry = HydrationEntry(date: now, snapshot: HydrationStore.currentSnapshot())
+        let snapshot = HydrationStore.currentSnapshot()
+        var entries = [HydrationEntry(date: now, snapshot: snapshot)]
+
         let midnight = Calendar.current.nextDate(after: now, matching: DateComponents(hour: 0, minute: 0),
                                                  matchingPolicy: .nextTime) ?? now.addingTimeInterval(3600)
-        // Midnight has to be exact, or the widget shows yesterday's number. The hourly
-        // wake is a safety net for the days the app never gets to run.
+        // A second entry the face can advance to without being woken. Asking for a reload
+        // is only a request: complication refreshes come out of a small daily budget, and
+        // when it runs out nothing wakes the timeline — which left yesterday's ring, goal
+        // colour and all, on the face all day. With this entry the rollover is already in
+        // the timeline, so the worst a missed wake costs is a stale total, never a stale
+        // day.
+        var rolledOver = snapshot
+        rolledOver.day = midnight
+        rolledOver.totalML = 0
+        rolledOver.lastDrinkDate = nil
+        entries.append(HydrationEntry(date: midnight, snapshot: rolledOver))
+
+        // The hourly wake is a safety net for the days the app never gets to run.
         let next = min(midnight, now.addingTimeInterval(3600))
-        completion(Timeline(entries: [entry], policy: .after(next)))
+        completion(Timeline(entries: entries, policy: .after(next)))
     }
 }

@@ -2,6 +2,9 @@ import HidrateKit
 import SwiftUI
 
 struct SettingsView: View {
+    /// Set when Settings is presented as a sheet from Today; as a tab it needs no way out.
+    var onDone: (() -> Void)?
+
     @Environment(AppState.self) private var app
     @State private var showScanner = false
 
@@ -21,6 +24,11 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .toolbar {
+                if let onDone {
+                    ToolbarItem(placement: .confirmationAction) { Button("Done", action: onDone) }
+                }
+            }
             .navigationDestination(for: SavedBottle.self) { BottleDetailView(bottleID: $0.id) }
             .sheet(isPresented: $showScanner) { AddBottleView() }
             .task { await app.refreshNotificationStatus() }

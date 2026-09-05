@@ -24,11 +24,11 @@ struct HydrationSnapshot: Codable, Hashable, Sendable {
     var updated: Date = Date()
 
     var isStale: Bool { !Calendar.current.isDateInToday(day) }
-    var progress: Double { goalML > 0 ? min(totalML / goalML, 1) : 0 }
+    var progress: Double { goalReached ? 1 : (goalML > 0 ? min(totalML / goalML, 1) : 0) }
     /// How far round a second lap, once the goal is in. Capped at one more lap: past
     /// twice the goal the ring stops saying anything new.
     var overflow: Double { goalML > 0 ? min(max(totalML / goalML - 1, 0), 1) : 0 }
-    var goalReached: Bool { goalML > 0 && totalML >= goalML }
+    var goalReached: Bool { unit.reachedGoal(totalML, goalML: goalML) }
     var remainingML: Double { max(goalML - totalML, 0) }
 
     // MARK: - Pace

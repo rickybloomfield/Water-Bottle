@@ -38,7 +38,8 @@ struct WatchTodayView: View {
 
     private var presetGrid: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 2), spacing: 6) {
-            ForEach(snapshot.presetsML, id: \.self) { ml in
+            // Biggest first, so the amounts you reach for most are nearest the top.
+            ForEach(Array(snapshot.presetsML.reversed()), id: \.self) { ml in
                 Button {
                     model.log(volumeML: ml)
                     WKInterfaceDevice.current().play(.click)
