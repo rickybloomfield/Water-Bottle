@@ -30,6 +30,10 @@ public final class HidrateBottleModel {
     public private(set) var gatt: GATTInventory?
     public private(set) var deviceInformation: [String: String] = [:]
     public private(set) var batteryPercent: Int?
+    /// Signal strength of the live link, in dBm. A connected bottle stops advertising, so
+    /// this is the only reading that can be compared with the bottles that still are.
+    public private(set) var connectedRSSI: Int?
+    public private(set) var connectedRSSIAt: Date?
     /// Capacity configured inside the bottle (what its own sip percentages refer to).
     public private(set) var bottleCapacityML: Int?
     public private(set) var capState: CapState?
@@ -179,6 +183,49 @@ public final class HidrateBottleModel {
         return rezero(toRaw: stableRaw, automatic: false)
     }
 
+    /// Point the model at another bottle's saved calibration and level.
+    ///
+    /// Everything derived from the old bottle goes with it: its scale, the level it was
+    /// holding, and what the tracker was measuring against. Nothing about one bottle
+    /// should ever be read through another one's calibration, and a drink is the
+    /// difference between two readings of the *same* bottle.
+    public func activate(store newStore: CalibrationStore?) {
+        guard newStore?.keyPrefix != store?.keyPrefix else { return }
+        store = newStore
+        storedCalibration = newStore?.loadCalibration()
+        tracker.reset(baselineML: newStore?.loadBaselineML())
+        if let capacity = storedCalibration?.capacityML { tracker.capacityML = capacity }
+        believedLevelML = newStore?.loadBelievedLevelML()
+        rememberedRaw = newStore?.loadLastRaw()?.raw
+        stableRaw = nil
+        latestWeight = nil
+        stableStreak = 0
+        weightSampleCount = 0
+        filter.reset()
+        zeroDrift.reset()
+        lastSettled = nil
+        supersededByAutoRezero = nil
+        pendingRecoveryCheck = false
+        awaitingFirstSettledReading = false
+        levelChanges = []
+        sips = []
+        deviceInformation = [:]
+        batteryPercent = nil
+        bottleCapacityML = nil
+        capState = nil
+        capChangedAt = nil
+        connectedRSSI = nil
+        connectedRSSIAt = nil
+    }
+
+    /// Switch to one of the bottles you own: its saved calibration and level, and a
+    /// connection to it in place of whatever is connected now.
+    public func use(_ saved: SavedBottle, defaults: UserDefaults = .standard) {
+        connectedBottleName = saved.name
+        activate(store: saved.store(defaults: defaults))
+        client.use(identifier: saved.peripheralID, name: saved.name)
+    }
+
     /// What the model managed to restore, for the session log.
     public var restoredStateDescription: String {
         let baseline = tracker.baselineML.map { "\(Int($0.rounded()))mL" } ?? "none"
@@ -222,7 +269,7 @@ public final class HidrateBottleModel {
     private var supersededByAutoRezero: (calibration: BottleCalibration, date: Date)?
     private var stableSubscribers: [UUID: AsyncStream<Int>.Continuation] = [:]
     private var eventTask: Task<Void, Never>?
-    private let store: CalibrationStore?
+    private var store: CalibrationStore?
 
     public init(client: HidrateBottleClient = HidrateBottleClient(), store: CalibrationStore? = CalibrationStore()) {
         self.client = client
@@ -318,8 +365,12 @@ public final class HidrateBottleModel {
 
     // MARK: - Commands
 
+    /// How long a bottle stays in `bottles` after it was last heard.
+    public var sightingLifetime: TimeInterval = 180
+
     public func startScanning() { client.startScanning() }
     public func stopScanning() { client.stopScanning() }
+    public func setProximityListening(_ enabled: Bool) { client.setProximityListening(enabled) }
 
     public func connect(_ bottle: DiscoveredBottle) {
         connectedBottleName = bottle.name
@@ -419,13 +470,16 @@ public final class HidrateBottleModel {
             bluetoothState = state
         case .scanning(let scanning):
             isScanning = scanning
-            if scanning { bottles = [] }
         case .discovered(let bottle):
             if let index = bottles.firstIndex(where: { $0.id == bottle.id }) {
                 bottles[index] = bottle
             } else {
                 bottles.append(bottle)
             }
+            // The list outlives any one scan — the proximity listen keeps filling it while
+            // nobody is looking — so it is trimmed by age rather than emptied on demand.
+            let cutoff = Date().addingTimeInterval(-sightingLifetime)
+            bottles.removeAll { $0.lastSeen < cutoff && $0.id != bottle.id }
             bottles.sort { $0.rssi > $1.rssi }
         case .connection(let state):
             if state != connectionState { connectionStateChangedAt = Date() }
@@ -444,6 +498,8 @@ public final class HidrateBottleModel {
                 stableStreak = 0
                 capState = nil
                 gatt = nil
+                connectedRSSI = nil
+                connectedRSSIAt = nil
             }
         case .gatt(let inventory):
             gatt = inventory
@@ -451,6 +507,9 @@ public final class HidrateBottleModel {
             deviceInformation = info
         case .battery(let level):
             batteryPercent = level
+        case .rssi(let value):
+            connectedRSSI = value
+            connectedRSSIAt = Date()
         case .bottleConfig(let config):
             bottleCapacityML = config.capacityML
         case .cap(let state):

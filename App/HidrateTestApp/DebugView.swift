@@ -58,14 +58,32 @@ struct DebugView: View {
                 }
                 Toggle("Read unknown characteristics on connect", isOn: $app.readUnknownOnConnect)
                 Toggle("Subscribe to all characteristics", isOn: $app.exploreAllCharacteristics)
-                Picker("Bottle capacity", selection: $app.capacityML) {
-                    Text("21 oz (621 mL)").tag(BottleCalibration.capacityML(ounces: 21))
-                    Text("24 oz (710 mL)").tag(BottleCalibration.capacityML(ounces: 24))
-                    Text("32 oz (946 mL)").tag(BottleCalibration.capacityML(ounces: 32))
+            }
+
+            Section {
+                ForEach(LEDPattern.allCases) { pattern in
+                    Button {
+                        app.model.client.setLED(pattern)
+                    } label: {
+                        LabeledContent(pattern.title, value: String(format: "0x%02X", pattern.rawValue))
+                    }
+                    .disabled(!app.model.isConnected)
                 }
+                Button("Light off") { app.model.client.setLED(rawByte: 0x00) }
+                    .disabled(!app.model.isConnected)
+            } header: {
+                Text("Light patterns")
+            } footer: {
+                Text("Fires the pattern on the connected bottle, for checking what a byte does.")
             }
 
             Section("Drink light details") {
+                Picker("Drink light", selection: Binding(
+                    get: { LEDPattern(rawValue: UInt8(app.drinkLEDByte & 0xFF)) ?? .drinkSuccess },
+                    set: { app.drinkLEDByte = Int($0.rawValue) }
+                )) {
+                    ForEach(LEDPattern.allCases) { Text($0.title).tag($0) }
+                }
                 Toggle("Stop the glow after a delay", isOn: $app.ledStopEnabled)
                 if app.ledStopEnabled {
                     Stepper(value: $app.ledStopByte, in: 0...255) {
@@ -78,19 +96,42 @@ struct DebugView: View {
                 Stepper(value: $app.drinkLEDByte, in: 0...255) {
                     LabeledContent("Raw colour byte", value: String(format: "0x%02X", app.drinkLEDByte))
                 }
+                Button("Preview a logged drink") { app.flashDrinkLED() }
+                    .disabled(!app.model.isConnected)
+            }
+
+            Section("Calibration") {
+                if let calibration = app.model.calibration {
+                    LabeledContent("Empty raw", value: String(format: "%.1f", calibration.emptyRaw))
+                    LabeledContent("Full raw", value: String(format: "%.1f", calibration.fullRaw))
+                    LabeledContent("Capacity", value: Format.ml(calibration.capacityML))
+                    LabeledContent("Scale", value: String(format: "%.3f raw / mL", calibration.rawUnitsPerML))
+                    LabeledContent("Calibrated", value: Format.dateTime.string(from: calibration.calibratedAt))
+                    if let raw = app.model.stableRaw {
+                        LabeledContent("Live reading", value: Format.mlAndOz(calibration.milliliters(forRaw: Double(raw))))
+                    }
+                } else {
+                    Text("Not calibrated").foregroundStyle(.secondary)
+                }
+                LabeledContent("Raw weight", value: app.model.latestWeight.map { String($0.raw) } ?? "—")
+                LabeledContent("Stable", value: app.model.stableRaw.map(String.init) ?? "—")
+                LabeledContent("Streak", value: "\(app.model.stableStreak)")
+            }
+
+            Section("Closest bottle") {
+                LabeledContent("Bottles", value: "\(app.roster.bottles.count)")
+                LabeledContent("In use", value: app.activeBottle?.displayName ?? "none")
+                LabeledContent("Connecting automatically", value: app.autoConnect ? "yes" : "no")
+                ForEach(app.roster.bottles) { bottle in
+                    LabeledContent(bottle.displayName, value: app.strength(of: bottle).map { String(format: "%.0f dBm", $0) } ?? "not heard")
+                }
+                Button("Reconsider now") { app.reconsiderTheClosestBottle() }
             }
 
             Section("Diagnostics") {
                 NavigationLink { ExploreView() } label: { Label("GATT explorer & log", systemImage: "antenna.radiowaves.left.and.right") }
                 ShareLink(item: app.sessionLog.url) { Label("Share session log (\(app.sessionLog.sizeDescription))", systemImage: "square.and.arrow.up") }
                 Button("Clear session log", role: .destructive) { app.sessionLog.clear() }
-            }
-
-            Section {
-                Button("Forget saved bottle", role: .destructive) {
-                    app.model.disconnect()
-                    app.model.client.forgetLastBottle()
-                }
             }
         }
         .navigationTitle("Debug")

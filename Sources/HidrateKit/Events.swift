@@ -127,6 +127,8 @@ public enum BottleEvent: Sendable {
     case gatt(GATTInventory)
     case deviceInformation([String: String])
     case battery(Int)
+    /// Signal strength of the connected bottle, in dBm, from a `readRSSI()`.
+    case rssi(Int)
     /// The bottle's own configuration block (capacity in mL), read from the Reference service.
     case bottleConfig(BottleConfig)
     case weight(WeightSample)

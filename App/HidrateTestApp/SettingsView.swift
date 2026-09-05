@@ -16,8 +16,6 @@ struct SettingsView: View {
                 Section {
                     NavigationLink { DebugView() } label: { Label("Debug", systemImage: "wrench.and.screwdriver") }
                     LabeledContent("Version", value: AppVersion.short)
-                } footer: {
-                    Text("Bluetooth diagnostics, raw sensor data, and tuning. You shouldn't need these day to day. The watch app carries its own version, at the bottom of its screen — compare the two to see whether the watch has caught up.")
                 }
             }
             .navigationTitle("Settings")
@@ -46,8 +44,6 @@ struct SettingsView: View {
             }
         } header: {
             Text("Goal")
-        } footer: {
-            Text("A common target is about 64 oz (1.9 L) a day. Adjust to what works for you.")
         }
     }
 
@@ -95,47 +91,20 @@ struct SettingsView: View {
         } header: {
             Text("Reminders")
         } footer: {
-            if app.reminders.enabled {
-                let n = app.reminders.fireTimes.count
-                Text(n > 0
-                     ? "Up to \(n) a day, and only when you're behind: a reminder is skipped if you've already drunk what this window says you should have by then. The tick on the Today ring marks that pace."
-                     : "Choose a window with at least one reminder in it.")
-            } else if !app.notificationsAuthorized {
-                Text("Turning this on asks for notification permission.")
+            if app.reminders.enabled, app.reminders.fireTimes.isEmpty {
+                Text("Choose a window with at least one reminder in it.")
             }
         }
     }
 
-    // MARK: - Drink light
+    // MARK: - Bottle light
 
     private var lightSection: some View {
         @Bindable var app = app
-        let known = LEDPattern(rawValue: UInt8(app.drinkLEDByte & 0xFF))
-        return Section {
+        return Section("Bottle light") {
             Toggle("Glow when a drink is logged", isOn: $app.flashLEDOnDrink)
-            if app.flashLEDOnDrink {
-                Picker("Light", selection: Binding(
-                    get: { known ?? .drinkSuccess },
-                    set: { app.drinkLEDByte = Int($0.rawValue) }
-                )) {
-                    ForEach(LEDPattern.allCases) { Text($0.title).tag($0) }
-                }
-                if known == nil {
-                    // The picker can't show a byte that isn't one of the presets, so say
-                    // so rather than displaying the wrong thing.
-                    LabeledContent("Currently", value: String(format: "custom byte 0x%02X", app.drinkLEDByte & 0xFF))
-                        .foregroundStyle(.orange)
-                    Button("Use the standard blue glow") { app.drinkLEDByte = Int(LEDPattern.drinkSuccess.rawValue) }
-                }
-                Button("Preview on the bottle") { app.flashDrinkLED() }
-                    .disabled(!app.model.isConnected)
-            }
             Toggle("Glow when you reach your goal", isOn: $app.flashLEDOnGoal)
-            Toggle("Stay dark on connect", isOn: $app.quietLightOnConnect)
-        } header: {
-            Text("Bottle light")
-        } footer: {
-            Text("The bottle's own scheduled glow reminders come from the connection handshake and are unaffected. \"Stay dark on connect\" puts the light out as soon as that handshake finishes, so the bottle doesn't flash every time it reconnects — which it does about four times an hour.")
+            Toggle("Glow when connected", isOn: $app.glowOnConnect)
         }
     }
 
@@ -152,8 +121,6 @@ struct SettingsView: View {
             }
         } header: {
             Text("Apple Health")
-        } footer: {
-            Text("Each drink is saved as water intake so it counts everywhere else you track hydration.")
         }
     }
 }

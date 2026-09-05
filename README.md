@@ -20,8 +20,10 @@ Talk to a HidrateSpark PRO water bottle directly over Bluetooth, without the off
   **Progress** charts daily/weekly/monthly intake from Apple Health with streaks and
   stats, and leads to every day there is — filter to the ones that missed the goal, and
   open one to see what it holds and to add, correct or remove drinks on it, the same as
-  Today. Days load a season at a time as you scroll back. **Bottle** covers connection, hardware details, and calibration. **Settings**
-  holds your goal, units (oz or mL), drink reminders, the bottle's drink light, Health
+  Today. Days load a season at a time as you scroll back. **Bottle** is the list of bottles
+  you own — one opens onto its water level, its calibration, what it is, and the red
+  Disconnect button. **Settings**
+  holds your goal, units (oz or mL), drink reminders, the bottle's lights, Health
   access, and a Debug area with the engineering tools.
 * **`App/HidrateWidgets`** (iOS widget): the day's ring on the home screen, with one-tap
   amounts on the medium size, plus lock-screen accessory sizes.
@@ -133,6 +135,50 @@ open the app.
 The widget's timeline asks to be woken hourly and exactly at midnight — midnight so it
 never shows yesterday's number, hourly as a safety net for a day when the app never runs.
 
+## More than one bottle
+
+The Bottle tab is a list, and **Add Bottle** appends to it. Each row opens onto everything
+about that bottle: what's in it, when it was calibrated, its model, firmware and serial,
+a name you can give it, and the two ways of being done with it — Forget This Bottle, and
+a red Disconnect at the bottom that stops the app connecting to it until you tap Connect
+again.
+
+Exactly one bottle is in use at a time, marked **Active** in the list, and the app picks
+it: the closest one. Everything about that is per bottle — a bottle's calibration, its
+level and the baseline the tracker measures against live under its own keys, and switching
+points the model at another set of them, because a reading is only meaningful through the
+calibration of the bottle it came from. The bottle carried over from before there was a
+list keeps the keys it already had, so nothing about it is lost.
+
+The identity a bottle is filed under is its **advertised name** (`h2oDB618BB`), not its
+CoreBluetooth identifier: a PRO 2 changes its Bluetooth address every quarter of an hour,
+so the identifier is only ever the address it happened to be wearing. The address is kept
+alongside as a hint and replaced whenever the bottle turns up under a new one.
+
+### Which one is closest
+
+Radio strength stands in for distance, and it is a noisy stand-in: two bottles on the same
+desk trade places several times a minute, and every trade would cost a disconnect, a
+handshake and a hole in the weight stream. So `ProximitySelector` makes a challenger earn
+it. It has to be heard **8 dB louder**, keep that lead for **30 seconds**, and wait until
+the bottle in possession has had a **two-minute turn**. Two bottles the same distance apart
+therefore never trade — the margin is never met — while one you actually pick up takes over
+within half a minute. A bottle that has gone quiet for three minutes hands over at once,
+with no margin and no waiting, and one you pick by hand gets a full turn before the radio
+is allowed to change its mind.
+
+Hearing the other bottles takes a scan, and a scan costs battery, so it is duty-cycled:
+six seconds of listening every forty-five, and only when there is more than one bottle to
+choose between. The connected bottle stops advertising, so it can't be heard that way —
+it is asked directly with `readRSSI()` at the top of each window, which is the only reading
+comparable with the ones that are still advertising.
+
+CoreBluetooth allows one scan at a time and three things want one — the Add Bottle sheet,
+a reconnect chasing an address change, and this — so the client holds them as a set of
+purposes and the widest wins. Only the sheet asks for repeat advertisements, because only
+it is showing live signal strength; the other two get one sighting per scan, which is far
+less radio and far less log.
+
 ## Calibration, and the zero that won't sit still
 
 Two numbers describe the bottle's scale: how many raw units a millilitre is worth, and
@@ -147,7 +193,7 @@ So the app stops treating a full calibration as the fix for drift:
 * **Re-zeroing keeps the scale and moves only the empty point** — `rezeroed(toEmptyRaw:)`.
   A drink measured before a re-zero measures the same after it, because only the origin
   moved, so the tracker carries on uninterrupted.
-* **The Bottle tab has a one-tap "Bottle is empty — set the zero"**, which is the whole
+* **A bottle's page has a one-tap "Bottle is empty — set the zero"**, which is the whole
   correction. Measuring full again is unnecessary.
 * **It also happens on its own.** A bottle cannot hold less than nothing, so settled
   readings that stay more than 25 mL below empty for three samples and 45 seconds mean the
@@ -170,6 +216,11 @@ The zero also creeps *upward*, and there is no matching fix: a zero is captured 
 empty bottle, and one with water in it has nothing to say about where empty sits. So when
 the scale reads more than the bottle can hold, the Bottle tab says so and asks for the one
 thing that settles it — an empty bottle and the button above.
+
+Calibrating itself is two numbered steps — empty, then full — each with one button, and it
+saves the moment both readings are in and make sense. The raw units, the span and the
+scale that used to be on that screen are diagnostics rather than instructions, and they
+have moved to **Settings → Debug → Calibration**.
 
 ## Picking the bottle up
 
@@ -247,14 +298,16 @@ goal, and its own scheduled glow reminders, which the firmware runs from the slo
 written during the connection handshake.
 
 The handshake also left the light doing something on every connect. Since the PRO 2 drops
-the link roughly every fifteen minutes, that is a flash four times an hour for nothing.
-The client now writes the off byte (`0x00`) as soon as the handshake finishes —
-**Settings → Bottle light → Stay dark on connect**, on by default. The three lights above
-all happen after that point, so none of them are affected.
+the link roughly every fifteen minutes, that is a flash four times an hour for nothing, so
+the client writes a byte of its own as soon as the handshake finishes: the off byte
+(`0x00`) by default, or the green glow (`0xB4`) with **Settings → Bottle light → Glow when
+connected** turned on. It is off by default, for the same four-times-an-hour reason. The
+three lights above all happen after that point, so none of them are affected.
 
-The drink light's byte is a firmware preset, and the Debug area can set it to any byte at
-all. Settings now says when the stored byte isn't one of the known presets, rather than
-showing the picker's fallback and quietly playing something else.
+Settings offers the three lights and nothing else. The colours are firmware presets and
+picking between them is a thing to test rather than a thing to set, so the list of them —
+each firing on the connected bottle when tapped — is in **Settings → Debug → Light
+patterns**, along with the raw byte for the drink light.
 
 ## When a drink goes missing
 
@@ -298,9 +351,10 @@ This builds the app, the widget, the watch app and the complication. Run on a re
 (CoreBluetooth does not work in the Simulator). Before connecting, force-quit the official
 Hidrate app: the bottle only accepts one connection.
 
-1. **Bottle tab → Find bottle**, tap your `h2o…` bottle.
-2. **Bottle tab → Calibrate**: capture empty (dry, lid on, on a table), then capture full.
-   It saves itself and the bottle glows green.
+1. **Bottle tab → Add Bottle**, tap your `h2o…` bottle. Add as many as you own; the
+   closest one is the one in use.
+2. **Bottle tab → your bottle → Calibration**: take the empty reading (dry, lid on, on a
+   table), then the full one. It saves itself and the bottle glows green.
 3. **Settings → Allow Health access**, set your goal and units. The reminder window's
    **From** and **Until** times set the day's pace: reminders are only sent when you're
    behind it, and the tick on every ring marks it.

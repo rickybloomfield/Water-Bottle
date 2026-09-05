@@ -1,7 +1,14 @@
 import Foundation
 
 /// Persists the calibration and the last known water level in `UserDefaults`.
+///
+/// One store holds one bottle's state. The prefix is what separates them, so a second
+/// bottle is a second store with a different prefix rather than a second copy of anything.
 public final class CalibrationStore: @unchecked Sendable {
+    /// What every key this store writes begins with. Two stores are the same store when
+    /// these match.
+    public let keyPrefix: String
+
     private let defaults: UserDefaults
     private let calibrationKey: String
     private let baselineKey: String
@@ -13,6 +20,7 @@ public final class CalibrationStore: @unchecked Sendable {
 
     public init(defaults: UserDefaults = .standard, keyPrefix: String = "HidrateKit") {
         self.defaults = defaults
+        self.keyPrefix = keyPrefix
         calibrationKey = keyPrefix + ".calibration"
         baselineKey = keyPrefix + ".baselineML"
         lastLevelKey = keyPrefix + ".lastLevelML"
@@ -84,5 +92,14 @@ public final class CalibrationStore: @unchecked Sendable {
 
     public func saveBelievedLevelML(_ value: Double?) {
         if let value { defaults.set(value, forKey: believedLevelKey) } else { defaults.removeObject(forKey: believedLevelKey) }
+    }
+
+    /// Throw away everything saved for this bottle. Used when one is removed, so adding it
+    /// back later starts from nothing rather than from a calibration nobody remembers.
+    public func erase() {
+        for key in [calibrationKey, baselineKey, lastLevelKey, lastLevelDateKey,
+                    lastRawKey, lastRawDateKey, believedLevelKey] {
+            defaults.removeObject(forKey: key)
+        }
     }
 }

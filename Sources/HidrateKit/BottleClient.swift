@@ -51,15 +51,17 @@ public struct BottleClientOptions: Sendable, Equatable {
     /// address (and therefore its CoreBluetooth identifier) from time to time; a connect
     /// request aimed at the old identity never completes. Strongly recommended.
     public var rescanWhileConnecting = true
-    /// Write the LED "off" byte once the connection handshake is done.
+    /// What to write to the light once the connection handshake is done, or nil to leave
+    /// whatever the handshake left.
     ///
     /// The initialisation the official app performs — which this replays, because the
     /// bottle stays silent without it — leaves the light doing something on every
     /// connect. Since the PRO 2 drops the link every quarter of an hour, that is a flash
-    /// four times an hour for no reason. The bottle's own lights (a logged drink, the
-    /// goal, its scheduled glow reminders) are unaffected: this fires once, immediately,
-    /// before any of those can happen.
-    public var silenceLEDAfterHandshake = true
+    /// four times an hour for no reason, so the default is the "off" byte. Writing a glow
+    /// byte here instead turns the same moment into a deliberate hello. Either way it
+    /// fires once, immediately, and the bottle's own lights — a logged drink, the goal,
+    /// its scheduled glow reminders — are unaffected.
+    public var ledOnConnect: UInt8? = 0x00
 
     public init() {}
 }
@@ -101,7 +103,16 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     private var reconnectScanTimer: DispatchSourceTimer?
     private var reconnectScanActive = false
     private var reconnectScanSightings = 0
+    private var scanPurposes: Set<ScanPurpose> = []
+    /// Whether the scan in flight is narrowed to the bottle service, so an unchanged
+    /// request doesn't restart it.
+    private var scanIsFiltered: Bool?
+    private var proximityTimer: DispatchSourceTimer?
+    private var proximityWindow: TimeInterval = 6
     private var manualRetryInProgress = false
+    /// Peripherals let go of on the way to another bottle, so their disconnect callback
+    /// isn't mistaken for the link dropping and answered with a reconnect.
+    private var abandoned: Set<UUID> = []
     private var targetName: String?
     private var state: ConnectionState = .disconnected(reason: nil) {
         didSet { emit(.connection(state)) }
@@ -165,6 +176,12 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
 
     // MARK: - Scanning
 
+    /// Why a scan is running. CoreBluetooth allows one scan at a time and three things
+    /// want one — the Add Bottle sheet, a reconnect chasing an address change, and the
+    /// listen for other bottles that decides which is closest — so they are held as a set
+    /// and the widest of them wins.
+    private enum ScanPurpose: Hashable { case user, reconnect, proximity }
+
     public func startScanning() {
         queue.async {
             guard self.central.state == .poweredOn else {
@@ -172,21 +189,82 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
                 self.log(.warning, "Scan requested while Bluetooth is \(Self.describe(self.central.state)); will start when powered on")
                 return
             }
-            self.central.scanForPeripherals(
-                withServices: nil,
-                options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
-            )
-            self.emit(.scanning(true))
             self.log(.info, "Scanning for peripherals named \(self._options.namePrefix)…")
+            self.beginScanning(for: .user)
         }
     }
 
     public func stopScanning() {
         queue.async {
             self.scanRequested = false
-            if self.central.state == .poweredOn { self.central.stopScan() }
-            self.emit(.scanning(false))
+            self.endScanning(for: .user)
         }
+    }
+
+    /// Keep half an ear on the other bottles you own, so the app can tell which one is
+    /// closest, without leaving the radio on: `window` seconds of listening every
+    /// `period`. A bottle advertises often enough to be caught by a short window, and the
+    /// connected one is asked for its own signal strength at the same moment.
+    public func setProximityListening(_ enabled: Bool, window: TimeInterval = 6, period: TimeInterval = 45) {
+        queue.async {
+            self.proximityTimer?.cancel()
+            self.proximityTimer = nil
+            self.proximityWindow = window
+            guard enabled else {
+                self.endScanning(for: .proximity)
+                return
+            }
+            let timer = DispatchSource.makeTimerSource(queue: self.queue)
+            timer.schedule(deadline: .now(), repeating: period)
+            timer.setEventHandler { [weak self] in self?.listenOnce() }
+            timer.resume()
+            self.proximityTimer = timer
+        }
+    }
+
+    private func listenOnce() {
+        if let peripheral, peripheral.state == .connected { peripheral.readRSSI() }
+        // Restarted rather than merely requested: a scan already running for another
+        // reason has long since reported everything it can see, and this window needs a
+        // reading taken now.
+        beginScanning(for: .proximity, restarting: true)
+        queue.asyncAfter(deadline: .now() + proximityWindow) { [weak self] in
+            self?.endScanning(for: .proximity)
+        }
+    }
+
+    private func beginScanning(for purpose: ScanPurpose, restarting: Bool = false) {
+        scanPurposes.insert(purpose)
+        applyScanState(restarting: restarting)
+    }
+
+    private func endScanning(for purpose: ScanPurpose) {
+        scanPurposes.remove(purpose)
+        applyScanState()
+    }
+
+    private func applyScanState(restarting: Bool = false) {
+        emit(.scanning(scanPurposes.contains(.user) && central.state == .poweredOn))
+        guard central.state == .poweredOn else { return }
+        guard !scanPurposes.isEmpty else {
+            if scanIsFiltered != nil {
+                central.stopScan()
+                scanIsFiltered = nil
+            }
+            return
+        }
+        // The Add Bottle sheet wants everything nearby; the other two only want bottles,
+        // which is a filter iOS can apply while the app is in the background. Only that
+        // sheet wants repeats, too — it is showing live signal strength. Everything else
+        // is better served by one sighting per scan, which is a great deal less radio and
+        // a great deal less log.
+        let filtered = !scanPurposes.contains(.user)
+        guard restarting || scanIsFiltered != filtered else { return }
+        central.scanForPeripherals(
+            withServices: filtered ? [CBUUID(string: HidrateUUID.referenceService)] : nil,
+            options: [CBCentralManagerScanOptionAllowDuplicatesKey: !filtered]
+        )
+        scanIsFiltered = filtered
     }
 
     // MARK: - Connecting
@@ -223,6 +301,45 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
                 return
             }
             self.attemptConnection()
+        }
+    }
+
+    /// Use this bottle from now on, dropping whichever one is in hand.
+    ///
+    /// The name is the identity that lasts: a PRO 2 changes its Bluetooth address every
+    /// quarter of an hour, so the identifier is only ever the address it was wearing when
+    /// it was last seen. Pass what you have; if the address is stale or missing, the
+    /// bottle is found by name instead.
+    public func use(identifier: UUID?, name: String) {
+        queue.async {
+            // Restoration can hand us a live peripheral before any target is set, and
+            // tearing that down to reconnect to the same bottle would be a wasted round trip.
+            let sameBottle = name == (self.targetName ?? self.peripheral?.name ?? self.lastBottleName)
+            if !sameBottle, let current = self.peripheral {
+                self.log(.info, "Switching to \(name); letting go of \(current.name ?? "the current bottle")")
+                self.abandoned.insert(current.identifier)
+                self.sessionActive = false
+                self.resetSessionState()
+                self.central.cancelPeripheralConnection(current)
+                self.peripheral = nil
+                self.state = .disconnected(reason: nil)
+            }
+            self.targetName = name
+            self.targetIdentifier = identifier
+            self.wantsConnection = true
+            UserDefaults.standard.set(name, forKey: Self.lastBottleNameKey)
+            if let identifier {
+                UserDefaults.standard.set(identifier.uuidString, forKey: Self.lastBottleKey)
+                self.attemptConnection()
+            } else {
+                // No address to aim at. Find it by name; the scan connects to whatever
+                // address it turns up under.
+                UserDefaults.standard.removeObject(forKey: Self.lastBottleKey)
+                self.state = .connecting
+                self.connectAttemptStarted = Date()
+                self.log(.info, "No saved address for \(name); scanning for it by name")
+                self.startReconnectScan()
+            }
         }
     }
 
@@ -305,8 +422,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
             }
             return
         }
-        central.stopScan()
-        emit(.scanning(false))
+        endScanning(for: .user)
         peripheral = found
         found.delegate = self
         if targetName == nil, let name = found.name, !name.isEmpty {
@@ -328,10 +444,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         guard _options.rescanWhileConnecting, central.state == .poweredOn else { return }
         reconnectScanActive = true
         reconnectScanSightings = 0
-        central.scanForPeripherals(
-            withServices: [CBUUID(string: HidrateUUID.referenceService)],
-            options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
-        )
+        beginScanning(for: .reconnect)
         let check = DispatchSource.makeTimerSource(queue: queue)
         check.schedule(deadline: .now() + 20, repeating: 30)
         check.setEventHandler { [weak self] in
@@ -352,7 +465,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         reconnectScanTimer = nil
         if reconnectScanActive {
             reconnectScanActive = false
-            if central.state == .poweredOn { central.stopScan() }
+            endScanning(for: .reconnect)
         }
     }
 
@@ -369,8 +482,11 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
             return
         }
         // Same name, different identifier: the bottle's Bluetooth address changed.
-        let old = targetIdentifier?.uuidString.prefix(8) ?? "-"
-        log(.warning, "Bottle \(name) reappeared with a new identifier \(found.identifier.uuidString.prefix(8)) (was \(old)); its Bluetooth address changed. Switching.")
+        if let old = targetIdentifier?.uuidString.prefix(8) {
+            log(.warning, "Bottle \(name) reappeared with a new identifier \(found.identifier.uuidString.prefix(8)) (was \(old)); its Bluetooth address changed. Switching.")
+        } else {
+            log(.info, "Found \(name) at \(found.identifier.uuidString.prefix(8)); connecting")
+        }
         if let stale = peripheral, stale.identifier != found.identifier, stale.state == .connecting {
             manualRetryInProgress = true
             central.cancelPeripheralConnection(stale)
@@ -378,7 +494,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         targetIdentifier = found.identifier
         UserDefaults.standard.set(found.identifier.uuidString, forKey: Self.lastBottleKey)
         cancelReconnectScan()
-        peripheral = found
+        self.peripheral = found
         found.delegate = self
         connectAttemptStarted = Date()
         state = .connecting
@@ -452,6 +568,12 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     }
 
     private func handleDisconnect(_ peripheral: CBPeripheral, error: Error?, isReconnecting: Bool) {
+        if abandoned.remove(peripheral.identifier) != nil {
+            // We let this one go to switch bottles. The link dropping is the point, and
+            // the connection now in flight is somebody else's.
+            log(.info, "Let go of \(peripheral.name ?? "the previous bottle")")
+            return
+        }
         sessionActive = false
         if manualRetryInProgress {
             // Our own cancel of a pending connect; attemptConnection() is already scheduled.
@@ -491,12 +613,12 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         }
     }
 
-    /// Put the light out after connecting, so the handshake's own writes don't leave it
+    /// Settle the light after connecting, so the handshake's own writes don't leave it
     /// blinking. Called on the client queue, straight after the last handshake step.
-    private func silenceLEDIfWanted() {
-        guard _options.silenceLEDAfterHandshake, characteristic(HidrateUUID.ledControl) != nil else { return }
-        log(.info, "Quieting the connect-time light")
-        write(HidrateUUID.ledControl, Data([0x00]))
+    private func settleLEDAfterHandshake() {
+        guard let byte = _options.ledOnConnect, characteristic(HidrateUUID.ledControl) != nil else { return }
+        log(.info, byte == 0 ? "Quieting the connect-time light" : String(format: "Connect-time light 0x%02X", byte))
+        write(HidrateUUID.ledControl, Data([byte]))
     }
 
     public func setLED(_ pattern: LEDPattern) {
@@ -509,6 +631,15 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
 
     public func readBattery() {
         read(characteristic: HidrateUUID.batteryLevel)
+    }
+
+    /// Ask the connected bottle how strongly it is heard. A connected peripheral stops
+    /// advertising, so this is the only way to compare it with the ones that still are.
+    public func readRSSI() {
+        queue.async {
+            guard let peripheral = self.peripheral, peripheral.state == .connected else { return }
+            peripheral.readRSSI()
+        }
     }
 
     /// Send a handshake sequence manually (for experiments).
@@ -649,7 +780,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
             state = .handshaking
             log(.info, "Sending \(steps.count)-step \(mode.rawValue) init")
             runHandshake(steps) { [weak self] in
-                self?.silenceLEDIfWanted()
+                self?.settleLEDAfterHandshake()
                 self?.subscribeToStreams()
             }
             return
@@ -772,8 +903,10 @@ extension HidrateBottleClient: CBCentralManagerDelegate {
         case .poweredOn:
             if scanRequested {
                 scanRequested = false
-                startScanning()
+                beginScanning(for: .user)
             }
+            // Anything that asked to scan before the radio was up gets its scan now.
+            applyScanState()
             if let restored = peripheral, restored.state == .connected {
                 log(.info, "Restored connection to \(restored.name ?? "bottle")")
                 beginSession(with: restored)
@@ -781,6 +914,7 @@ extension HidrateBottleClient: CBCentralManagerDelegate {
                 attemptConnection()
             }
         case .poweredOff, .unauthorized, .unsupported:
+            scanIsFiltered = nil
             if peripheral != nil || state.isConnected {
                 sessionActive = false
                 resetSessionState()
@@ -891,6 +1025,7 @@ extension HidrateBottleClient: CBCentralManagerDelegate {
     }
 
     public func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        if abandoned.remove(peripheral.identifier) != nil { return }
         log(.error, "Connect failed: \(Self.describe(error))")
         state = .disconnected(reason: error?.localizedDescription ?? "connect failed")
         if wantsConnection, _options.autoReconnect {
@@ -1013,6 +1148,11 @@ extension HidrateBottleClient: CBPeripheralDelegate {
         default:
             emit(.rawValue(CharacteristicValue(uuid: uuid, data: data, receivedAt: now)))
         }
+    }
+
+    public func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
+        guard error == nil, RSSI.intValue != 127 else { return }  // 127 means "unavailable"
+        emit(.rssi(RSSI.intValue))
     }
 
     public func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {

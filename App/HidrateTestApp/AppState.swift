@@ -103,7 +103,34 @@ final class AppState {
     var autoLogToHealth: Bool { didSet { defaults.set(autoLogToHealth, forKey: Keys.autoLog) } }
     var intakeSource: IntakeSource { didSet { defaults.set(intakeSource.rawValue, forKey: Keys.source) } }
     var minimumLogML: Double { didSet { defaults.set(minimumLogML, forKey: Keys.minimumLog) } }
-    var capacityML: Double { didSet { defaults.set(capacityML, forKey: Keys.capacity) } }
+
+    /// The bottles you own, and which one is in use.
+    private(set) var roster: BottleRoster { didSet { BottleRosterStore.save(roster) } }
+    /// Off after a deliberate disconnect, so the app doesn't quietly connect again behind
+    /// your back. Tapping Connect on any bottle turns it back on.
+    var autoConnect: Bool { didSet { defaults.set(autoConnect, forKey: Keys.autoConnect) } }
+    private var selector = ProximitySelector()
+    /// The freshest sighting already handed to the selector, so a list entry that hasn't
+    /// been updated isn't mistaken for having been heard again.
+    private var lastFedSighting: [String: Date] = [:]
+    private var proximityTask: Task<Void, Never>?
+
+    /// How much the bottle being calibrated holds. Per bottle: a 21 oz and a 32 oz on the
+    /// same list have nothing to say about each other.
+    var capacityML: Double {
+        get {
+            roster.active?.calibrationCapacityML
+                ?? roster.active?.capacityML.map(Double.init)
+                ?? storedCapacityML
+        }
+        set {
+            storedCapacityML = newValue
+            guard var bottle = roster.active else { return }
+            bottle.calibrationCapacityML = newValue
+            roster[bottle.id] = bottle
+        }
+    }
+    private var storedCapacityML: Double { didSet { defaults.set(storedCapacityML, forKey: Keys.capacity) } }
     var exploreAllCharacteristics: Bool {
         didSet {
             defaults.set(exploreAllCharacteristics, forKey: Keys.exploreAll)
@@ -154,13 +181,14 @@ final class AppState {
 
     var flashLEDOnDrink: Bool { didSet { defaults.set(flashLEDOnDrink, forKey: Keys.flashLED) } }
     var flashLEDOnGoal: Bool { didSet { defaults.set(flashLEDOnGoal, forKey: Keys.flashGoalLED) } }
-    /// Put the bottle's light out as soon as the connection handshake finishes, so the
-    /// handshake's own writes don't leave it flashing every time the bottle reconnects.
-    var quietLightOnConnect: Bool {
+    /// Say hello with a green glow when the bottle connects. Off by default: the PRO 2
+    /// reconnects about four times an hour, and a light on each of those is a light for
+    /// nothing. Off means the handshake's own flash is put out instead.
+    var glowOnConnect: Bool {
         didSet {
-            defaults.set(quietLightOnConnect, forKey: Keys.quietOnConnect)
+            defaults.set(glowOnConnect, forKey: Keys.glowOnConnect)
             var options = model.client.options
-            options.silenceLEDAfterHandshake = quietLightOnConnect
+            options.ledOnConnect = glowOnConnect ? LEDPattern.greenGlow.rawValue : 0x00
             model.client.options = options
         }
     }
@@ -209,7 +237,8 @@ final class AppState {
         static let readUnknown = "app.readUnknownOnConnect"
         static let flashLED = "app.flashLEDOnDrink"
         static let flashGoalLED = "app.flashLEDOnGoal"
-        static let quietOnConnect = "app.quietLightOnConnect"
+        static let glowOnConnect = "app.glowOnConnect"
+        static let autoConnect = "app.autoConnect"
         static let unit = "app.unit"
         static let goal = "app.dailyGoalML"
         static let reminders = "app.reminders"
@@ -240,9 +269,9 @@ final class AppState {
         reminders = (defaults.data(forKey: Keys.reminders)).flatMap { try? JSONDecoder().decode(ReminderSettings.self, from: $0) } ?? ReminderSettings()
         flashLEDOnDrink = defaults.object(forKey: Keys.flashLED) as? Bool ?? true
         flashLEDOnGoal = defaults.object(forKey: Keys.flashGoalLED) as? Bool ?? true
-        let quiet = defaults.object(forKey: Keys.quietOnConnect) as? Bool ?? true
-        options.silenceLEDAfterHandshake = quiet
-        quietLightOnConnect = quiet
+        let glow = defaults.object(forKey: Keys.glowOnConnect) as? Bool ?? false
+        options.ledOnConnect = glow ? LEDPattern.greenGlow.rawValue : 0x00
+        glowOnConnect = glow
         drinkLEDByte = defaults.object(forKey: Keys.ledByte) as? Int ?? Int(LEDPattern.drinkSuccess.rawValue)
         ledStopEnabled = defaults.object(forKey: Keys.ledStop) as? Bool ?? true
         ledStopByte = defaults.object(forKey: Keys.ledStopByte) as? Int ?? 0x00 // best guess for "off"
@@ -252,8 +281,9 @@ final class AppState {
         autoLogToHealth = defaults.object(forKey: Keys.autoLog) as? Bool ?? true
         intakeSource = defaults.string(forKey: Keys.source).flatMap(IntakeSource.init(rawValue:)) ?? .weight
         minimumLogML = defaults.object(forKey: Keys.minimumLog) as? Double ?? 15
-        capacityML = defaults.object(forKey: Keys.capacity) as? Double ?? BottleCalibration.capacityML(ounces: 21)
-
+        storedCapacityML = defaults.object(forKey: Keys.capacity) as? Double ?? BottleCalibration.capacityML(ounces: 21)
+        autoConnect = defaults.object(forKey: Keys.autoConnect) as? Bool ?? true
+        roster = BottleRosterStore.load() ?? BottleRoster()
         // One-time: adopt the confirmed blue-glow drink colour (0xB0) for anyone who was
         // left on an exploratory byte before the LED map was known.
         if !defaults.bool(forKey: "app.migratedDrinkLED") {
@@ -263,6 +293,11 @@ final class AppState {
         let support = (try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
             ?? FileManager.default.temporaryDirectory
         entriesURL = support.appendingPathComponent("intake-entries.json")
+        migrateSingleBottleIfNeeded()
+        adoptABottleIfNoneIsInUse()
+        // Before anything can arrive from the radio: a reading is only meaningful through
+        // the calibration of the bottle it came from.
+        if let active = roster.active { model.activate(store: active.store()) }
         adoptedDrinkIDs = (defaults.stringArray(forKey: Keys.adopted) ?? []).compactMap(UUID.init(uuidString:))
         loadEntries()
 
@@ -289,7 +324,10 @@ final class AppState {
             publishSnapshot()
         }
         model.onSip = { [weak self] record in self?.handle(record) }
-        model.onEvent = { [weak self] event in self?.sessionLog.record(event) }
+        model.onEvent = { [weak self] event in
+            self?.sessionLog.record(event)
+            self?.absorb(event)
+        }
 
         healthAuthorized = HealthKitWaterLogger.isAvailable && health.canWrite
         sessionLog.write("restored \(model.restoredStateDescription)")
@@ -303,7 +341,12 @@ final class AppState {
             // is not worth crashing over. (The watch app crashed on exactly that.)
             Task { @MainActor in self?.reloadPersistedBottleState() }
         }
-        model.reconnectLastBottle()
+        if autoConnect, let active = roster.active {
+            model.use(active)
+        } else if autoConnect {
+            model.reconnectLastBottle()
+        }
+        startListeningForTheClosestBottle()
         startHealthObserver()
         adoptPendingDrinks()
         // Always write once at launch, so a fresh install has a real snapshot to read
@@ -315,9 +358,173 @@ final class AppState {
     /// Re-read the calibration and level saved on disk if the launch came up without
     /// them. Without this the session runs uncalibrated and logs nothing it measures.
     func reloadPersistedBottleState() {
+        // The bottle list is the first thing to recover: which bottle is in use decides
+        // which calibration is the one to reload.
+        if roster.bottles.isEmpty {
+            roster = BottleRosterStore.load() ?? roster
+            migrateSingleBottleIfNeeded()
+            adoptABottleIfNoneIsInUse()
+            if let active = roster.active {
+                sessionLog.write("recovered the bottle list; using \(active.displayName)")
+                model.activate(store: active.store())
+                if autoConnect, !model.isConnected { model.use(active) }
+                applyProximityListening()
+            }
+        }
         guard model.reloadPersistedStateIfNeeded() else { return }
         sessionLog.write("recovered state unreadable at launch: \(model.restoredStateDescription)")
         publishSnapshot()
+    }
+
+    // MARK: - Bottles
+
+    var activeBottle: SavedBottle? { roster.active }
+
+    func isActive(_ bottle: SavedBottle) -> Bool { roster.activeID == bottle.id }
+
+    /// Signal strength for a bottle, as the selector currently hears it.
+    func strength(of bottle: SavedBottle) -> Double? { selector.strength(of: bottle.id) }
+
+    /// The app used to hold one bottle in one pair of defaults keys. Carry that bottle
+    /// into the list under the keys it already has, so its calibration, its level and the
+    /// day it is in the middle of all survive the move.
+    private func migrateSingleBottleIfNeeded() {
+        guard roster.bottles.isEmpty, let name = model.client.lastBottleName, !name.isEmpty else { return }
+        var bottle = SavedBottle(
+            name: name,
+            peripheralID: model.client.lastBottleIdentifier,
+            storeKeyPrefix: "HidrateKit"
+        )
+        bottle.calibrationCapacityML = storedCapacityML
+        roster = BottleRoster(bottles: [bottle], activeID: bottle.id)
+        sessionLog.write("carried \(name) into the bottle list")
+    }
+
+    /// A list with bottles on it and nothing in use has no way back on its own, since
+    /// nothing is heard until something is connected to. Take the first one.
+    private func adoptABottleIfNoneIsInUse() {
+        guard roster.activeID == nil, let first = roster.bottles.first else { return }
+        roster.activeID = first.id
+    }
+
+    /// Take on a bottle found by the scanner and start using it.
+    @discardableResult
+    func addBottle(_ discovered: DiscoveredBottle) -> SavedBottle {
+        var bottle = roster[discovered.name] ?? SavedBottle(name: discovered.name)
+        bottle.peripheralID = discovered.id
+        roster[bottle.id] = bottle
+        sessionLog.write("added bottle \(bottle.name)")
+        use(bottle, byHand: true)
+        return bottle
+    }
+
+    /// Make this the bottle in use. By hand means it was chosen rather than overheard, so
+    /// it gets a full turn before the radio is allowed to change its mind.
+    func use(_ bottle: SavedBottle, byHand: Bool) {
+        if byHand {
+            autoConnect = true
+            selector.pin(bottle.id)
+        }
+        if roster.activeID != bottle.id { sessionLog.write("using \(bottle.displayName)") }
+        roster.activeID = bottle.id
+        model.use(bottle)
+        applyProximityListening()
+    }
+
+    func rename(_ bottle: SavedBottle, to nickname: String) {
+        guard var stored = roster[bottle.id] else { return }
+        stored.nickname = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        roster[bottle.id] = stored
+    }
+
+    /// Stop connecting to the bottle in use until you ask again.
+    func disconnectActive() {
+        autoConnect = false
+        model.disconnect()
+        applyProximityListening()
+        sessionLog.write("disconnected by hand")
+    }
+
+    /// Remove a bottle and everything saved about it, and move on to another if there is one.
+    func forget(_ bottle: SavedBottle) {
+        let wasInUse = roster.activeID == bottle.id
+        if wasInUse { model.disconnect() }
+        selector.forget(bottle.id)
+        lastFedSighting[bottle.id] = nil
+        roster.remove(id: bottle.id)
+        sessionLog.write("forgot bottle \(bottle.name)")
+        if wasInUse {
+            model.activate(store: nil)
+            model.client.forgetLastBottle()
+            if let next = roster.bottles.first { use(next, byHand: true) }
+        }
+        applyProximityListening()
+    }
+
+    /// Listening for the other bottles is only worth the radio time when there is a
+    /// choice to be made.
+    private func applyProximityListening() {
+        model.setProximityListening(autoConnect && roster.bottles.count > 1)
+    }
+
+    private func startListeningForTheClosestBottle() {
+        applyProximityListening()
+        proximityTask?.cancel()
+        proximityTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(20))
+                guard let self else { return }
+                self.reconsiderTheClosestBottle()
+            }
+        }
+    }
+
+    /// Hand the radio's latest to the selector and act on what it says.
+    func reconsiderTheClosestBottle() {
+        guard autoConnect, roster.bottles.count > 1 else { return }
+        let now = Date()
+        for sighting in model.bottles {
+            guard roster[sighting.name] != nil else { continue }
+            // Only a sighting that is actually new: re-feeding a stale row would keep a
+            // bottle sounding present long after it stopped advertising.
+            guard lastFedSighting[sighting.name].map({ sighting.lastSeen > $0 }) ?? true else { continue }
+            lastFedSighting[sighting.name] = sighting.lastSeen
+            selector.heard(sighting.name, rssi: sighting.rssi, at: sighting.lastSeen)
+        }
+        // The connected bottle stops advertising, so it is asked for its own strength.
+        if let name = roster.activeID, let rssi = model.connectedRSSI, let at = model.connectedRSSIAt,
+           lastFedSighting[name].map({ at > $0 }) ?? true {
+            lastFedSighting[name] = at
+            selector.heard(name, rssi: rssi, at: at)
+        }
+        guard let chosen = selector.choose(from: roster.bottles.map(\.id), now: now),
+              chosen != roster.activeID, let bottle = roster[chosen] else { return }
+        sessionLog.write("\(bottle.displayName) is closer; switching to it")
+        use(bottle, byHand: false)
+    }
+
+    /// Keep the saved record of the bottle in use current with what the link says.
+    ///
+    /// Read from the event rather than from the model: this runs before the model has
+    /// taken the event in, so the model still holds the previous answer.
+    private func absorb(_ event: BottleEvent) {
+        guard var bottle = roster.active else { return }
+        switch event {
+        case .deviceInformation(let info):
+            bottle.absorb(deviceInformation: info, capacityML: nil, batteryPercent: nil)
+        case .battery(let level):
+            bottle.batteryPercent = level
+        case .bottleConfig(let config):
+            bottle.capacityML = config.capacityML
+        case .connection(let state):
+            guard case .ready = state else { return }
+            bottle.lastConnectedAt = Date()
+            bottle.peripheralID = model.client.lastBottleIdentifier ?? bottle.peripheralID
+        default:
+            return
+        }
+        guard bottle != roster[bottle.id] else { return }
+        roster[bottle.id] = bottle
     }
 
     // MARK: - Tracker configuration
@@ -644,6 +851,7 @@ final class AppState {
     func backgroundRefresh() async {
         sessionLog.write("background refresh")
         reloadPersistedBottleState()
+        reconsiderTheClosestBottle()
         model.client.nudgeReconnect()
         await catchUp()
         // Reminders are laid down two days at a time and only for the slots you're behind
@@ -657,7 +865,7 @@ final class AppState {
         let calibration = BottleCalibration(emptyRaw: emptyRaw, fullRaw: fullRaw, capacityML: capacityML)
         sessionLog.write(String(format: "calibration saved empty=%.1f full=%.1f capacity=%.0f scale=%.3f raw/mL", emptyRaw, fullRaw, capacityML, calibration.rawUnitsPerML))
         model.calibration = calibration
-        if model.isConnected { model.client.setLED(.calibrationSuccess) }  // green glow
+        if model.isConnected { model.client.setLED(.greenGlow) }
     }
 
     /// Take the reading in hand as a new empty point, keeping the scale. What drift

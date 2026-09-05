@@ -158,8 +158,8 @@ public enum LEDPattern: UInt8, Sendable, CaseIterable, Identifiable {
     case drinkReminder = 0xAC
     /// Blue glow. Alternate: 0x30. Used when a sip is taken — the drink-success light.
     case drinkSuccess = 0xB0
-    /// Green glow. Used here to confirm a successful calibration.
-    case calibrationSuccess = 0xB4
+    /// Green glow. Used to confirm a calibration, and as the hello on connect.
+    case greenGlow = 0xB4
     /// Red flash. An error indicator.
     case error = 0xBD
 
@@ -171,7 +171,7 @@ public enum LEDPattern: UInt8, Sendable, CaseIterable, Identifiable {
         case .blueBlinks: "Blue blinks"
         case .drinkReminder: "Drink reminder (blue flashes)"
         case .drinkSuccess: "Drink logged (blue glow)"
-        case .calibrationSuccess: "Calibration OK (green glow)"
+        case .greenGlow: "Green glow"
         case .error: "Error (red flash)"
         }
     }

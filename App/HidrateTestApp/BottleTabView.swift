@@ -1,227 +1,200 @@
+import CoreBluetooth
 import HidrateKit
 import SwiftUI
 
-/// Everything about the bottle itself: connection, hardware details, calibration.
+/// The bottles you own. One of them is in use at a time — the closest one — and each
+/// opens onto everything about itself.
 struct BottleTabView: View {
-    @State private var rezeroMessage: String?
-
     @Environment(AppState.self) private var app
     @State private var showScanner = false
 
-    private var model: HidrateBottleModel { app.model }
-
     var body: some View {
         NavigationStack {
-            List {
-                connectionSection
-                if model.isConnected { levelSection }
-                calibrationSection
-                if !model.deviceInformation.isEmpty || model.bottleCapacityML != nil { aboutSection }
-            }
-            .navigationTitle("Bottle")
-            .alert("Zero set", isPresented: Binding(get: { rezeroMessage != nil }, set: { if !$0 { rezeroMessage = nil } })) {
-                Button("OK", role: .cancel) {}
-            } message: { Text(rezeroMessage ?? "") }
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Find bottle", systemImage: "magnifyingglass") { showScanner = true }
-                }
-            }
-            .sheet(isPresented: $showScanner) { ScanView() }
-        }
-    }
-
-    private var connectionSection: some View {
-        Section {
-            HStack(spacing: 14) {
-                Image(systemName: "waterbottle.fill")
-                    .font(.title2)
-                    .foregroundStyle(model.isConnected ? Color.blue : Color.secondary)
-                    .frame(width: 40, height: 40)
-                    .background((model.isConnected ? Color.blue : Color.secondary).opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(model.connectedBottleName ?? "HidrateSpark").font(.headline)
-                    Text(model.connectionState.label).font(.subheadline).foregroundStyle(.secondary)
-                }
-                Spacer()
-                if let battery = model.batteryPercent {
-                    Label("\(battery)%", systemImage: batterySymbol(battery)).font(.subheadline).foregroundStyle(.secondary)
-                }
-            }
-            .padding(.vertical, 4)
-
-            if model.isConnected {
-                Button("Disconnect", role: .destructive) { model.disconnect() }
-            } else if model.connectionState == .connecting {
-                TimelineView(.periodic(from: .now, by: 1)) { ctx in
-                    Text("Looking for the bottle (\(elapsed(at: ctx.date))). Lifting it or opening the cap wakes it up. Make sure the official Hidrate app is closed.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-                HStack {
-                    Button("Retry") { model.reconnectLastBottle() }
-                    Spacer()
-                    Button("Cancel", role: .destructive) { model.disconnect() }
-                }
-            } else if model.client.lastBottleIdentifier != nil {
-                Button("Reconnect") { model.reconnectLastBottle() }
-            } else {
-                Button("Find a bottle") { showScanner = true }
-            }
-        } header: {
-            Text("Connection")
-        } footer: {
-            Text("The bottle briefly disconnects and changes its address every 15 minutes or so; the app reconnects on its own.")
-        }
-    }
-
-    private var levelSection: some View {
-        Section("Water level") {
-            if let calibration = model.calibration, calibration.isValid {
-                if let level = model.displayLevelML, let fraction = model.displayFillFraction {
-                    Gauge(value: fraction) { Text("Fill") } currentValueLabel: { Text(app.volume(level)) }
-                        .gaugeStyle(.accessoryLinear)
-                    LabeledContent("In the bottle", value: app.volume(level))
-                    LabeledContent("Fill", value: "\(Int((fraction * 100).rounded()))%")
-                    if let scale = model.clampedLevelML, abs(scale - level) >= 20 {
-                        // The scale's own answer, for when the two have parted company.
-                        LabeledContent("Scale reads", value: app.volume(scale))
-                            .foregroundStyle(.secondary)
+            Group {
+                if app.roster.bottles.isEmpty {
+                    ContentUnavailableView {
+                        Label("No Bottles", systemImage: "waterbottle")
+                    } description: {
+                        Text("Add your HidrateSpark to see its water level and log what you drink.")
+                    } actions: {
+                        Button("Add Bottle") { showScanner = true }
+                            .buttonStyle(.borderedProminent)
+                            .buttonBorderShape(.capsule)
+                            .controlSize(.large)
                     }
-                    if let drift = model.zeroDriftML, drift > 0 {
-                        Label("Reading \(app.volume(drift)) below empty — the zero has drifted.",
-                              systemImage: "exclamationmark.triangle")
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
-                    }
-                    if let over = model.overFullML, over > 20 {
-                        // The same stale zero, crept upward. Nothing can be done about it
-                        // from a bottle with water in it, so ask for the one thing that
-                        // fixes it: an empty bottle and the button below.
-                        Label("Reading \(app.volume(over)) more than the bottle holds — the zero has drifted. Empty it and set the zero.",
-                              systemImage: "exclamationmark.triangle")
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
-                    }
-                    rezeroButton
                 } else {
-                    Label("Waiting for a steady reading. Set the bottle on a flat surface.", systemImage: "hourglass")
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                Label("Calibrate to see the water level", systemImage: "scalemass").foregroundStyle(.orange)
-            }
-        }
-    }
-
-    /// Drift moves where empty reads without changing the scale, so re-capturing empty is
-    /// the whole fix. The app does it on its own once readings sit below empty for a
-    /// while; this is for doing it deliberately, with the bottle known to be empty.
-    private var rezeroButton: some View {
-        Button {
-            guard let shift = app.rezeroToCurrentReading() else { return }
-            rezeroMessage = "Zero moved by \(app.volume(abs(shift))). The bottle now reads empty."
-        } label: {
-            Label("Bottle is empty — set the zero", systemImage: "scalemass")
-        }
-        .disabled(model.stableRaw == nil)
-    }
-
-    private var calibrationSection: some View {
-        Section {
-            NavigationLink {
-                CalibrationView()
-            } label: {
-                HStack {
-                    Label("Calibrate", systemImage: "scalemass")
-                    Spacer()
-                    if let c = model.calibration {
-                        Text(c.calibratedAt.formatted(date: .abbreviated, time: .omitted)).foregroundStyle(.secondary)
-                    } else {
-                        Text("Not yet").foregroundStyle(.orange)
-                    }
+                    list
                 }
             }
-        } header: {
-            Text("Calibration")
-        } footer: {
-            Text("Calibration teaches the app what empty and full look like on this bottle. Redo it if the level starts looking off.")
+            .navigationTitle("Bottles")
+            .navigationDestination(for: SavedBottle.self) { BottleDetailView(bottleID: $0.id) }
+            .sheet(isPresented: $showScanner) { AddBottleView() }
         }
     }
 
-    private var aboutSection: some View {
-        Section("About this bottle") {
-            if let model = model.deviceInformation["Model Number"] { LabeledContent("Model", value: model) }
-            if let fw = model.deviceInformation["Firmware Revision"] { LabeledContent("Firmware", value: fw) }
-            if let hw = model.deviceInformation["Hardware Revision"] { LabeledContent("Hardware", value: hw) }
-            if let serial = model.deviceInformation["Serial Number"] { LabeledContent("Serial", value: serial) }
-            if let cap = model.bottleCapacityML { LabeledContent("Capacity", value: app.volume(Double(cap))) }
+    private var list: some View {
+        List {
+            if app.model.bluetoothState != .poweredOn, app.model.bluetoothState != .unknown {
+                Section {
+                    Label(bluetoothMessage, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            Section {
+                ForEach(app.roster.bottles) { bottle in
+                    NavigationLink(value: bottle) { BottleRow(bottle: bottle) }
+                }
+            } footer: {
+                if app.roster.bottles.count > 1 {
+                    Text("The closest bottle is the one in use.")
+                }
+            }
+
+            Section {
+                Button { showScanner = true } label: {
+                    Label("Add Bottle", systemImage: "plus")
+                }
+            }
         }
     }
 
-    private func batterySymbol(_ pct: Int) -> String {
-        switch pct {
-        case 90...: "battery.100percent"
-        case 60..<90: "battery.75percent"
-        case 35..<60: "battery.50percent"
-        case 15..<35: "battery.25percent"
-        default: "battery.0percent"
+    private var bluetoothMessage: String {
+        switch app.model.bluetoothState {
+        case .poweredOff: "Bluetooth is off."
+        case .unauthorized: "This app is not allowed to use Bluetooth."
+        case .unsupported: "This device has no Bluetooth."
+        default: "Bluetooth is starting up."
         }
-    }
-
-    private func elapsed(at date: Date) -> String {
-        let s = max(0, Int(date.timeIntervalSince(model.connectionStateChangedAt)))
-        return s < 60 ? "\(s)s" : "\(s / 60)m \(s % 60)s"
     }
 }
 
-/// Sheet listing nearby bottles.
-struct ScanView: View {
+/// One bottle in the list: what it is, how it's doing, and whether it's the one in use.
+struct BottleRow: View {
+    let bottle: SavedBottle
+    @Environment(AppState.self) private var app
+
+    private var isActive: Bool { app.isActive(bottle) }
+    private var isConnected: Bool { isActive && app.model.isConnected }
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "waterbottle.fill")
+                .font(.title3)
+                .foregroundStyle(isConnected ? Color.blue : Color.secondary)
+                .frame(width: 40, height: 40)
+                .background(
+                    (isConnected ? Color.blue : Color.secondary).opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
+            VStack(alignment: .leading, spacing: 2) {
+                Text(bottle.displayName).font(.headline)
+                Text(status).font(.subheadline).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            if isActive { ActiveBadge() }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var status: String {
+        guard isActive else {
+            if app.strength(of: bottle) != nil { return "Nearby" }
+            if let last = bottle.lastConnectedAt {
+                return "Last used \(last.formatted(.relative(presentation: .named)))"
+            }
+            return "Not in range"
+        }
+        if !app.autoConnect, !app.model.isConnected { return "Disconnected" }
+        var text = app.model.connectionState.label
+        if isConnected, let battery = app.model.batteryPercent { text += " · \(battery)%" }
+        return text
+    }
+}
+
+/// Marks the one bottle the app is using. Only ever one at a time.
+struct ActiveBadge: View {
+    var body: some View {
+        Text("Active")
+            .font(.caption2.weight(.semibold))
+            .textCase(.uppercase)
+            .foregroundStyle(Color.blue)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Color.blue.opacity(0.14), in: Capsule())
+    }
+}
+
+/// Sheet listing nearby bottles to take on.
+struct AddBottleView: View {
     @Environment(AppState.self) private var app
     @Environment(\.dismiss) private var dismiss
-    @State private var showAll = false
+
+    private var found: [DiscoveredBottle] {
+        app.model.bottles.filter { !$0.name.isEmpty && $0.name != "(unnamed)" }
+    }
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    Toggle("Show all nearby devices", isOn: $showAll)
-                        .onChange(of: showAll) { _, value in
-                            var options = app.model.client.options
-                            options.onlyBottles = !value
-                            app.model.client.options = options
-                            app.model.stopScanning()
-                            app.model.startScanning()
-                        }
-                }
-                Section(app.model.isScanning ? "Scanning…" : "Devices") {
-                    if app.model.bottles.isEmpty {
+                    if found.isEmpty {
                         HStack(spacing: 12) {
                             ProgressView()
-                            Text("Looking for a bottle named h2o… Make sure the official Hidrate app is closed.")
+                            Text("Looking for a bottle. Lifting it or opening the cap wakes it up, and the official Hidrate app has to be closed.")
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
+                        .padding(.vertical, 6)
                     }
-                    ForEach(app.model.bottles) { bottle in
-                        Button {
-                            app.model.connect(bottle)
-                            dismiss()
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text(bottle.name).font(.headline)
-                                    Text(bottle.id.uuidString).font(.caption2).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Text("\(bottle.rssi) dBm").foregroundStyle(.secondary)
-                            }
-                        }
+                    ForEach(found) { bottle in
+                        row(for: bottle)
                     }
+                } header: {
+                    Text("Nearby")
                 }
             }
-            .navigationTitle("Find bottle")
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+            .navigationTitle("Add Bottle")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .onAppear { app.model.startScanning() }
             .onDisappear { app.model.stopScanning() }
+        }
+    }
+
+    @ViewBuilder
+    private func row(for bottle: DiscoveredBottle) -> some View {
+        let alreadyAdded = app.roster[bottle.name] != nil
+        Button {
+            app.addBottle(bottle)
+            dismiss()
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: "waterbottle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(bottle.name).font(.headline)
+                    Text(alreadyAdded ? "Already added" : signal(bottle.rssi))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if alreadyAdded {
+                    Image(systemName: "checkmark").foregroundStyle(.secondary)
+                }
+            }
+        }
+        .disabled(alreadyAdded)
+    }
+
+    /// Radio strength as distance, which is the only thing it is being read for.
+    private func signal(_ rssi: Int) -> String {
+        switch rssi {
+        case (-55)...: "Right here"
+        case (-70)..<(-55): "Nearby"
+        default: "Farther away"
         }
     }
 }
