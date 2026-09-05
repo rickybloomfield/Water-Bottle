@@ -21,45 +21,45 @@ struct TodayView: View {
         return (0..<30).reversed().compactMap { calendar.date(byAdding: .day, value: -$0, to: today) }
     }
 
+    /// `scrollPosition` deals in optionals; the day never actually is one.
+    private var scrolledDay: Binding<Date?> {
+        Binding(get: { selectedDay }, set: { if let day = $0 { selectedDay = day } })
+    }
+
     var body: some View {
         @Bindable var app = app
         NavigationStack {
-            // The reader is for the tab bar's inset, which has to be measured before it
-            // is given up: a paged container lays its pages out inside the safe area and
-            // clips them to it, so every day ended at the top edge of the tab bar with a
-            // band of nothing beneath it. The pages take the whole screen instead, and
-            // each one hands the inset to its own list.
-            //
-            // To the *scroll content* only. Handing it to the page as safe area works too
-            // and leaves a list that behaves nearly right — but the scroll indicator is
-            // inset by it as well, so the bar ends short of the tab bar, and the page's
-            // own frame moves under it. Content margins move nothing but the content,
-            // which is the whole of what wanted moving.
-            GeometryReader { proxy in
-                TabView(selection: $selectedDay) {
+            // A paging scroll view rather than a paged TabView. The TabView was the
+            // stock paged container and its drag felt right, but it is a page-view
+            // controller underneath: it lays its pages out inside the safe area, clips
+            // them to it, and leaves its own backing view showing in the gap — a white
+            // band across the bottom, behind the tab bar, that no amount of insetting the
+            // pages would fill. This has no second view to show through, so a day is
+            // simply the height of the screen and its list takes the tab bar's inset the
+            // way every other list in the app does.
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 0) {
                     ForEach(days, id: \.self) { day in
                         DayContentView(day: day,
                                        onOpen: { detail = $0 },
                                        onDelete: { pendingDelete = $0 },
                                        scrolledUnder: $scrolledUnder)
-                            .contentMargins(.bottom, proxy.safeAreaInsets.bottom, for: .scrollContent)
-                            .tag(day)
+                            .containerRelativeFrame(.horizontal)
+                            .id(day)
                     }
                 }
-                // The stock paged container: its drag has the rubber-banding and the
-                // part-way follow that a gesture of our own did not. It claims every
-                // sideways drag on the page, which is why the rows offer no swipe.
-                .tabViewStyle(.page(indexDisplayMode: .never))
-                .ignoresSafeArea(.container, edges: .bottom)
-                // The strip is part of the safe area rather than a sibling stacked above
-                // it. Stacking it left each page ending at the tab bar instead of the
-                // screen, and a list that stops short of the bar has nothing to scroll
-                // behind it.
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    DayTimeline(days: days, selected: $selectedDay, onPick: { day in
-                        withAnimation(.snappy) { selectedDay = Calendar.current.startOfDay(for: day) }
-                    }, scrolledUnder: scrolledUnder)
-                }
+                .scrollTargetLayout()
+            }
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: scrolledDay, anchor: .center)
+            .scrollIndicators(.hidden)
+            // The strip is part of the safe area rather than a sibling stacked above it.
+            // Stacking it left each page ending at the tab bar instead of the screen, and
+            // a list that stops short of the bar has nothing to scroll behind it.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                DayTimeline(days: days, selected: $selectedDay, onPick: { day in
+                    withAnimation(.snappy) { selectedDay = Calendar.current.startOfDay(for: day) }
+                }, scrolledUnder: scrolledUnder)
             }
             // A day arrived at is at its top; only scrolling moves it from there.
             .onChange(of: selectedDay) { _, _ in scrolledUnder = 0 }
