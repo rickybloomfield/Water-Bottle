@@ -52,7 +52,9 @@ struct TodayView: View {
             }
             .scrollTargetBehavior(.paging)
             .scrollPosition(id: scrolledDay, anchor: .center)
-            .scrollIndicators(.hidden)
+            // Horizontal only: scroll-indicator visibility travels down the environment,
+            // and hiding both axes took the drinks list's own scroll bar with it.
+            .scrollIndicators(.hidden, axes: .horizontal)
             // The strip is part of the safe area rather than a sibling stacked above it.
             // Stacking it left each page ending at the tab bar instead of the screen, and
             // a list that stops short of the bar has nothing to scroll behind it.
