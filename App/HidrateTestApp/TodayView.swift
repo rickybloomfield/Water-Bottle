@@ -24,26 +24,37 @@ struct TodayView: View {
     var body: some View {
         @Bindable var app = app
         NavigationStack {
-            TabView(selection: $selectedDay) {
-                ForEach(days, id: \.self) { day in
-                    DayContentView(day: day,
-                                   onOpen: { detail = $0 },
-                                   onDelete: { pendingDelete = $0 },
-                                   scrolledUnder: $scrolledUnder)
-                        .tag(day)
+            // The reader is for the tab bar's inset, which has to be measured before it
+            // is given up: a paged container lays its pages out inside the safe area and
+            // clips them to it, so every day ended at the top edge of the tab bar with a
+            // band of nothing beneath it. The pages take the whole screen instead, and
+            // each one hands the inset to its own list — which is what puts the drinks
+            // *under* the bar as they scroll rather than stopping them at it.
+            GeometryReader { proxy in
+                TabView(selection: $selectedDay) {
+                    ForEach(days, id: \.self) { day in
+                        DayContentView(day: day,
+                                       onOpen: { detail = $0 },
+                                       onDelete: { pendingDelete = $0 },
+                                       scrolledUnder: $scrolledUnder)
+                            .safeAreaPadding(.bottom, proxy.safeAreaInsets.bottom)
+                            .tag(day)
+                    }
                 }
-            }
-            // The stock paged container: its drag has the rubber-banding and the
-            // part-way follow that a gesture of our own did not. It claims every
-            // sideways drag on the page, which is why the rows offer no swipe.
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            // The strip is part of the safe area rather than a sibling stacked above it.
-            // Stacking it left each page ending at the tab bar instead of the screen, and
-            // a list that stops short of the bar has nothing to scroll behind it.
-            .safeAreaInset(edge: .top, spacing: 0) {
-                DayTimeline(days: days, selected: $selectedDay, onPick: { day in
-                    withAnimation(.snappy) { selectedDay = Calendar.current.startOfDay(for: day) }
-                }, scrolledUnder: scrolledUnder)
+                // The stock paged container: its drag has the rubber-banding and the
+                // part-way follow that a gesture of our own did not. It claims every
+                // sideways drag on the page, which is why the rows offer no swipe.
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .ignoresSafeArea(.container, edges: .bottom)
+                // The strip is part of the safe area rather than a sibling stacked above
+                // it. Stacking it left each page ending at the tab bar instead of the
+                // screen, and a list that stops short of the bar has nothing to scroll
+                // behind it.
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    DayTimeline(days: days, selected: $selectedDay, onPick: { day in
+                        withAnimation(.snappy) { selectedDay = Calendar.current.startOfDay(for: day) }
+                    }, scrolledUnder: scrolledUnder)
+                }
             }
             // A day arrived at is at its top; only scrolling moves it from there.
             .onChange(of: selectedDay) { _, _ in scrolledUnder = 0 }
