@@ -780,17 +780,30 @@ final class AppState {
         await refreshHealthTotal()
     }
 
+    /// Remove a drink, from the app and from Apple Health.
+    ///
+    /// The row goes at once and Health catches up behind it. Deleting a sample can take
+    /// seconds, and a row that sits there through them reads as a tap that didn't land —
+    /// so it gets tapped again, and again, each one racing the last. Going first also
+    /// makes the second tap harmless: there is no longer an entry with that id to find.
+    ///
+    /// If Health refuses, the drink comes back where it was, because the sample is still
+    /// there and the two have to agree.
     func delete(_ entry: IntakeEntry) async {
-        if let uuid = entry.healthKitUUID {
+        guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
+        let removed = entries[index]
+        sessionLog.write("delete \(Int(removed.volumeML))mL at \(Format.time.string(from: removed.date))")
+        entries.remove(at: index)
+        model.removeLevelChange(id: entry.id)
+        if let uuid = removed.healthKitUUID {
             do {
                 try await health.deleteWater(uuid: uuid)
             } catch {
+                entries.insert(removed, at: min(index, entries.count))
                 lastError = "HealthKit delete failed: \(error.localizedDescription)"
                 return
             }
         }
-        entries.removeAll { $0.id == entry.id }
-        model.removeLevelChange(id: entry.id)
         await refreshHealthTotal()
     }
 

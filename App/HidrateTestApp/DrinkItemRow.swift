@@ -58,7 +58,13 @@ struct DrinkItemRow: View {
             if entry.healthKitUUID == nil {
                 Button("Save to Health", systemImage: "heart") { Task { await app.logToHealth(entry) } }
             }
-            Button("Delete", systemImage: "trash", role: .destructive) { onDelete(entry) }
+            // The role reddens the title on its own but leaves the symbol on the tint,
+            // so the label says red as well.
+            Button(role: .destructive) {
+                onDelete(entry)
+            } label: {
+                Label("Delete", systemImage: "trash").foregroundStyle(.red)
+            }
         }
     }
 
