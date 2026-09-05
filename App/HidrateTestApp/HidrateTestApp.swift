@@ -9,7 +9,7 @@ struct HidrateTestApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     enum Tab: String {
-        case today, progress, bottle, settings
+        case today, progress, settings
 
         /// Dev only: launch with `-startTab settings` to open straight onto a tab, for
         /// looking at one in the Simulator without walking to it.
@@ -29,9 +29,6 @@ struct HidrateTestApp: App {
                 HistoryView()
                     .tabItem { Label("Progress", systemImage: "chart.bar.fill") }
                     .tag(Tab.progress)
-                BottleTabView()
-                    .tabItem { Label("Bottle", systemImage: "waterbottle") }
-                    .tag(Tab.bottle)
                 SettingsView()
                     .tabItem { Label("Settings", systemImage: "gear") }
                     .tag(Tab.settings)

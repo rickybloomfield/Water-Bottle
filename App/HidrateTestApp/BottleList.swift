@@ -2,69 +2,41 @@ import CoreBluetooth
 import HidrateKit
 import SwiftUI
 
-/// The bottles you own. One of them is in use at a time — the closest one — and each
-/// opens onto everything about itself.
-struct BottleTabView: View {
+/// The bottles you own, at the top of Settings. One of them is in use at a time — the
+/// closest one — and each opens onto everything about itself.
+struct BottlesSection: View {
+    @Binding var showScanner: Bool
     @Environment(AppState.self) private var app
-    @State private var showScanner = false
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if app.roster.bottles.isEmpty {
-                    ContentUnavailableView {
-                        Label("No Bottles", systemImage: "waterbottle")
-                    } description: {
-                        Text("Add your HidrateSpark to see its water level and log what you drink.")
-                    } actions: {
-                        Button("Add Bottle") { showScanner = true }
-                            .buttonStyle(.borderedProminent)
-                            .buttonBorderShape(.capsule)
-                            .controlSize(.large)
-                    }
-                } else {
-                    list
-                }
+        Section {
+            if let warning = bluetoothWarning {
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
             }
-            .navigationTitle("Bottles")
-            .navigationDestination(for: SavedBottle.self) { BottleDetailView(bottleID: $0.id) }
-            .sheet(isPresented: $showScanner) { AddBottleView() }
-        }
-    }
-
-    private var list: some View {
-        List {
-            if app.model.bluetoothState != .poweredOn, app.model.bluetoothState != .unknown {
-                Section {
-                    Label(bluetoothMessage, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                }
+            ForEach(app.roster.bottles) { bottle in
+                NavigationLink(value: bottle) { BottleRow(bottle: bottle) }
             }
-
-            Section {
-                ForEach(app.roster.bottles) { bottle in
-                    NavigationLink(value: bottle) { BottleRow(bottle: bottle) }
-                }
-            } footer: {
-                if app.roster.bottles.count > 1 {
-                    Text("The closest bottle is the one in use.")
-                }
+            Button { showScanner = true } label: {
+                Label("Add Bottle", systemImage: "plus")
             }
-
-            Section {
-                Button { showScanner = true } label: {
-                    Label("Add Bottle", systemImage: "plus")
-                }
+        } header: {
+            Text("Bottles")
+        } footer: {
+            if app.roster.bottles.isEmpty {
+                Text("Add your HidrateSpark to see its water level and log what you drink.")
+            } else if app.roster.bottles.count > 1 {
+                Text("The closest bottle is the one in use.")
             }
         }
     }
 
-    private var bluetoothMessage: String {
+    private var bluetoothWarning: String? {
         switch app.model.bluetoothState {
         case .poweredOff: "Bluetooth is off."
         case .unauthorized: "This app is not allowed to use Bluetooth."
         case .unsupported: "This device has no Bluetooth."
-        default: "Bluetooth is starting up."
+        default: nil
         }
     }
 }

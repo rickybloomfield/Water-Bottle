@@ -361,7 +361,9 @@ final class AppState {
         // The bottle list is the first thing to recover: which bottle is in use decides
         // which calibration is the one to reload.
         if roster.bottles.isEmpty {
-            roster = BottleRosterStore.load() ?? roster
+            // Only when there is something to pick up: assigning the empty roster back to
+            // itself would save it, once per foreground, for nothing.
+            if let stored = BottleRosterStore.load(), !stored.bottles.isEmpty { roster = stored }
             migrateSingleBottleIfNeeded()
             adoptABottleIfNoneIsInUse()
             if let active = roster.active {

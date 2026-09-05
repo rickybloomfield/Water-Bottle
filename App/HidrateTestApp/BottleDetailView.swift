@@ -134,6 +134,12 @@ struct BottleDetailView: View {
                 .padding(.vertical, 2)
 
                 if isConnected {
+                    if let level = model.displayLevelML, let scale = model.clampedLevelML,
+                       abs(scale - level) >= 20 {
+                        // The scale's own answer, for when the two have parted company.
+                        LabeledContent("Scale reads", value: app.volume(scale))
+                            .foregroundStyle(.secondary)
+                    }
                     driftNotices
                     rezeroButton
                 }

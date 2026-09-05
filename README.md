@@ -20,11 +20,10 @@ Talk to a HidrateSpark PRO water bottle directly over Bluetooth, without the off
   **Progress** charts daily/weekly/monthly intake from Apple Health with streaks and
   stats, and leads to every day there is — filter to the ones that missed the goal, and
   open one to see what it holds and to add, correct or remove drinks on it, the same as
-  Today. Days load a season at a time as you scroll back. **Bottle** is the list of bottles
-  you own — one opens onto its water level, its calibration, what it is, and the red
-  Disconnect button. **Settings**
-  holds your goal, units (oz or mL), drink reminders, the bottle's lights, Health
-  access, and a Debug area with the engineering tools.
+  Today. Days load a season at a time as you scroll back. **Settings** opens on the
+  bottles you own — one opens onto its water level, its calibration, what it is, and the
+  red Disconnect button — then your goal, units (oz or mL), drink reminders, the bottle's
+  lights, Health access, and a Debug area with the engineering tools.
 * **`App/HidrateWidgets`** (iOS widget): the day's ring on the home screen, with one-tap
   amounts on the medium size, plus lock-screen accessory sizes.
 * **`App/HidrateWatchApp`** (watchOS) and **`App/HidrateWatchWidgets`**: the same ring and
@@ -137,7 +136,7 @@ never shows yesterday's number, hourly as a safety net for a day when the app ne
 
 ## More than one bottle
 
-The Bottle tab is a list, and **Add Bottle** appends to it. Each row opens onto everything
+Settings opens on the bottles you own, and **Add Bottle** appends to the list. Each row opens onto everything
 about that bottle: what's in it, when it was calibrated, its model, firmware and serial,
 a name you can give it, and the two ways of being done with it — Forget This Bottle, and
 a red Disconnect at the bottom that stops the app connecting to it until you tap Connect
@@ -214,7 +213,7 @@ reads as a drink — and being wrong about the level beats discarding every read
 
 The zero also creeps *upward*, and there is no matching fix: a zero is captured from an
 empty bottle, and one with water in it has nothing to say about where empty sits. So when
-the scale reads more than the bottle can hold, the Bottle tab says so and asks for the one
+the scale reads more than the bottle can hold, the bottle's page says so and asks for the one
 thing that settles it — an empty bottle and the button above.
 
 Calibrating itself is two numbered steps — empty, then full — each with one button, and it
@@ -273,7 +272,7 @@ adding most of a bottleful in one go sets it to full — the water had nowhere e
 so that is the one refill whose result is known from a difference alone. A smaller top-up
 only adds what went in.
 
-Between those, a missed event leaves it out of step, and the Bottle tab shows what the
+Between those, a missed event leaves it out of step, and the bottle's page shows what the
 scale says alongside it once the two differ by more than 20 mL.
 
 ## When the level reads below empty
@@ -283,7 +282,7 @@ The bottle's scale drifts: over days its zero creeps down, so the raw reading ca
 deliberately unclamped inside `HidrateKit` — drink detection wants the real number, and
 a little negative is ordinary noise — but nothing shown to a person uses it any more.
 `clampedLevelML` is what the app displays, and when the reading is genuinely under empty
-the Bottle tab says by how much and suggests recapturing the empty point.
+the bottle's page says by how much and suggests recapturing the empty point.
 
 The level the app shows before the bottle reconnects is stored as the last settled *raw*
 reading rather than as millilitres. Recalibrating then reinterprets it instead of
@@ -351,9 +350,9 @@ This builds the app, the widget, the watch app and the complication. Run on a re
 (CoreBluetooth does not work in the Simulator). Before connecting, force-quit the official
 Hidrate app: the bottle only accepts one connection.
 
-1. **Bottle tab → Add Bottle**, tap your `h2o…` bottle. Add as many as you own; the
-   closest one is the one in use.
-2. **Bottle tab → your bottle → Calibration**: take the empty reading (dry, lid on, on a
+1. **Settings → Bottles → Add Bottle**, tap your `h2o…` bottle. Add as many as you own;
+   the closest one is the one in use.
+2. **Settings → your bottle → Calibration**: take the empty reading (dry, lid on, on a
    table), then the full one. It saves itself and the bottle glows green.
 3. **Settings → Allow Health access**, set your goal and units. The reminder window's
    **From** and **Until** times set the day's pace: reminders are only sent when you're

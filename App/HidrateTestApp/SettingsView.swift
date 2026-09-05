@@ -3,11 +3,13 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(AppState.self) private var app
+    @State private var showScanner = false
 
     var body: some View {
         @Bindable var app = app
         NavigationStack {
             Form {
+                BottlesSection(showScanner: $showScanner)
                 goalSection
                 unitsSection
                 remindersSection
@@ -19,6 +21,8 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .navigationDestination(for: SavedBottle.self) { BottleDetailView(bottleID: $0.id) }
+            .sheet(isPresented: $showScanner) { AddBottleView() }
             .task { await app.refreshNotificationStatus() }
         }
     }
