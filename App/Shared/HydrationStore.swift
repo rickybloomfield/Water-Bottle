@@ -115,6 +115,11 @@ enum HydrationStore {
         #if os(watchOS)
         // By name rather than all at once: the watch has ignored every all-timelines
         // request it was sent, and there are reports of that call alone being broken.
+        //
+        // Neither form is honoured after an in-place update of the watch app: watchOS
+        // 27.0 (24R5358a) stops launching the extension until the watch is restarted or
+        // the app fully reinstalled, then runs the provider within 80 ms of a request.
+        // Filed as FB24667609 on 2026-09-05. Restart the watch after installing.
         WidgetCenter.shared.reloadTimelines(ofKind: complicationKind)
         #elseif canImport(WidgetKit)
         WidgetCenter.shared.reloadAllTimelines()
