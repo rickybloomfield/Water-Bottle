@@ -14,6 +14,8 @@ final class PhoneWatchLink: NSObject {
     /// Where to write what the link is doing: the session log, in practice.
     private var log: ((String) -> Void)?
     private var latest: HydrationSnapshot?
+    /// A publish that arrived before the session was ready, to send once it is.
+    private var heldForActivation: HydrationSnapshot?
     private static let lastComplicationKey = "watch.lastComplicationFingerprint"
     /// What the face was last given, so a budgeted transfer is only spent when it would
     /// look different. Persisted: kept in memory, every launch of this app started from
@@ -37,12 +39,23 @@ final class PhoneWatchLink: NSObject {
     }
 
     /// Latest wins: the watch only ever needs the current state, never the history of it.
-    func publish(_ snapshot: HydrationSnapshot) {
+    ///
+    /// `force` sends a context the watch already holds; otherwise one is skipped. Every
+    /// context wakes the watch app in the background, this app publishes on every launch,
+    /// and a handful of wakes in a minute is enough for watchOS to stop waking it
+    /// promptly — which held up a real change by twenty seconds.
+    func publish(_ snapshot: HydrationSnapshot, force: Bool = false) {
         latest = snapshot
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         guard session.activationState == .activated, session.isPaired, session.isWatchAppInstalled else {
+            heldForActivation = snapshot
             return log?("watch: publish held until activation; \(Self.describe(session))") ?? ()
+        }
+        heldForActivation = nil
+        let sent = WatchMessage.decode(HydrationSnapshot.self, from: session.applicationContext, key: WatchMessage.snapshotKey)
+        if !force, sent?.displayFingerprint == snapshot.displayFingerprint {
+            return log?("watch: context unchanged, not re-sent [\(snapshot.summary)]") ?? ()
         }
         let payload = WatchMessage.encode(snapshot, forKey: WatchMessage.snapshotKey)
         var route = "context"
@@ -68,8 +81,14 @@ final class PhoneWatchLink: NSObject {
         session.transferCurrentComplicationUserInfo(payload)
     }
 
-    private func republish() {
-        if let latest { publish(latest) }
+    /// What was held for activation; with `force`, the latest state regardless, for a
+    /// watch app that has just been (re)installed and holds nothing.
+    private func republish(force: Bool = false) {
+        if let held = heldForActivation {
+            publish(held, force: force)
+        } else if force, let latest {
+            publish(latest, force: true)
+        }
     }
 
     nonisolated static func describe(_ session: WCSession) -> String {
@@ -106,9 +125,14 @@ extension PhoneWatchLink: WCSessionDelegate {
     }
 
     /// Pairing, installation or the complication's presence on the active face changed.
+    /// A (re)installed watch app holds no context, so it gets the latest regardless.
     nonisolated func sessionWatchStateDidChange(_ session: WCSession) {
         let line = "watch: state changed; \(Self.describe(session))"
-        Task { @MainActor in self.log?(line) }
+        let installed = session.isWatchAppInstalled
+        Task { @MainActor in
+            self.log?(line)
+            if installed { self.republish(force: true) }
+        }
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
@@ -163,7 +187,7 @@ extension PhoneWatchLink: WCSessionDelegate {
         guard message[WatchMessage.requestKey] != nil else { return }
         Task { @MainActor in
             self.log?("watch: request without a reply handler; republishing")
-            self.republish()
+            self.republish(force: true)
         }
     }
 }
