@@ -102,7 +102,11 @@ struct HidrateWatchApp: App {
         }
         .onChange(of: scenePhase) { _, phase in
             DiagnosticLog.write("scenePhase -> \(phase)")
-            if phase == .active { model.refresh() }
+            guard phase == .active else { return }
+            model.refresh()
+            // The front is where a reload is free; use the visit to re-ask for anything
+            // the face has not drawn yet.
+            model.reloadComplicationIfNeeded(reason: "came to the front")
         }
     }
 }

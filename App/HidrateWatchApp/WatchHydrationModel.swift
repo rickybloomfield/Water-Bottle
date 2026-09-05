@@ -23,7 +23,7 @@ final class WatchHydrationModel {
     /// The last state a reload was asked for, so the several deliveries a launch
     /// produces — the stored context, the same context again, the phone's reply — cost
     /// one request rather than one each.
-    private var lastReloadRequest: String?
+    private var lastReloadRequest: (state: String, at: Date, foreground: Bool)?
     /// Set by the app delegate: connectivity content has been taken delivery of, so a
     /// background task waiting on it can be finished.
     var onConnectivityActivity: (() -> Void)?
@@ -72,13 +72,19 @@ final class WatchHydrationModel {
     /// changed since it last drew — and only once per state from this process.
     func reloadComplicationIfNeeded(reason: String) {
         let state = HydrationStore.currentSnapshot().displayFingerprint
-        if state == lastReloadRequest {
-            return DiagnosticLog.write("reload not requested (\(reason)): already asked for this state")
-        }
         if state == HydrationStore.renderedFingerprint {
             return DiagnosticLog.write("reload not requested (\(reason)): the face already shows this state")
         }
-        lastReloadRequest = state
+        let foreground = WKApplication.shared().applicationState == .active
+        if let last = lastReloadRequest, last.state == state {
+            // Already asked for exactly this. Ask again only from the front, where a
+            // reload is free, and only if the earlier ask was made from the background or
+            // a while ago: the system has been seen to ignore a background ask outright.
+            guard foreground, !last.foreground || Date().timeIntervalSince(last.at) > 60 else {
+                return DiagnosticLog.write("reload not requested (\(reason)): already asked for this state")
+            }
+        }
+        lastReloadRequest = (state, Date(), foreground)
         DiagnosticLog.write("reloadWidgets requested (\(reason)) app=\(DiagnosticLog.appState) lastGetTimeline=[\(HydrationStore.lastTimelineRun)]")
         HydrationStore.reloadWidgets()
     }
