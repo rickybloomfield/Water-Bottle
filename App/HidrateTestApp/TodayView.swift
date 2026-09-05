@@ -28,8 +28,13 @@ struct TodayView: View {
             // is given up: a paged container lays its pages out inside the safe area and
             // clips them to it, so every day ended at the top edge of the tab bar with a
             // band of nothing beneath it. The pages take the whole screen instead, and
-            // each one hands the inset to its own list — which is what puts the drinks
-            // *under* the bar as they scroll rather than stopping them at it.
+            // each one hands the inset to its own list.
+            //
+            // To the *scroll content* only. Handing it to the page as safe area works too
+            // and leaves a list that behaves nearly right — but the scroll indicator is
+            // inset by it as well, so the bar ends short of the tab bar, and the page's
+            // own frame moves under it. Content margins move nothing but the content,
+            // which is the whole of what wanted moving.
             GeometryReader { proxy in
                 TabView(selection: $selectedDay) {
                     ForEach(days, id: \.self) { day in
@@ -37,7 +42,7 @@ struct TodayView: View {
                                        onOpen: { detail = $0 },
                                        onDelete: { pendingDelete = $0 },
                                        scrolledUnder: $scrolledUnder)
-                            .safeAreaPadding(.bottom, proxy.safeAreaInsets.bottom)
+                            .contentMargins(.bottom, proxy.safeAreaInsets.bottom, for: .scrollContent)
                             .tag(day)
                     }
                 }
