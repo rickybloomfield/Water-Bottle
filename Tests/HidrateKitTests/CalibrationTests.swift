@@ -554,9 +554,10 @@ struct ZeroDriftWatcherTests {
 }
 
 /// Washing the bottle, from the session log of 5 September 2026: the sensor came off, the
-/// bottle was emptied, and the two went back together. Four drinks were logged — 97, 1008,
-/// 23 and 211 mL — from a 621 mL bottle nobody drank from. Levels are as the calibration in
-/// force read them (its zero had wandered a long way up; the tracker only ever uses steps).
+/// bottle was emptied, and the two went back together. Five drinks were logged — 97, 1008,
+/// 23, 211 and 18 mL — from a 621 mL bottle nobody drank from. Levels are as the
+/// calibration in force read them (its zero had wandered a long way up; the tracker only
+/// ever uses steps).
 @Suite("Washing the bottle")
 struct WashingTests {
     let capacity = 621.0
@@ -605,29 +606,19 @@ struct WashingTests {
         #expect(t.baselineML == 500)
     }
 
-    /// 16:43 to 16:50: the re-seated load cell sank at about 0.65 mL a second, which the
-    /// baseline followed in 1.3 mL steps every two seconds — until handling broke the
-    /// stream, and the creep that had built up meanwhile came back as a step: 23 mL over
-    /// 43 seconds, then 211 mL over six and a half minutes. Both logged as drinks.
+    /// 16:43 to 16:50: the re-seated load cell sank at about 0.65 mL a second. Handling
+    /// broke the stream, and the creep that built up meanwhile came back as a step: 23 mL
+    /// over 43 seconds, then 211 mL over six and a half minutes. Both logged as drinks.
+    /// Told the rate, the tracker takes the creep off and follows it instead.
     @Test func creepAcrossAGapIsNotADrink() {
         var t = tracker()
+        t.creepMLPerSecond = 0.65
         var now = t0
         var level = 513.0
         _ = t.ingest(levelML: level, at: now)
-        for _ in 1...10 {
-            now += 2; level -= 1.3
-            #expect(t.ingest(levelML: level, at: now) == nil)
-        }
-        #expect(abs(t.creepMLPerSecond - 0.65) < 0.05, "learnt \(t.creepMLPerSecond)")
-
         now += 43; level -= 0.65 * 43
         let small = t.ingest(levelML: level, at: now)
         #expect(small == nil, "43 s of creep: \(String(describing: small))")
-
-        for _ in 1...5 {
-            now += 2; level -= 1.3
-            _ = t.ingest(levelML: level, at: now)
-        }
         now += 390; level -= 0.65 * 390
         let large = t.ingest(levelML: level, at: now)
         #expect(large == nil, "six minutes of creep: \(String(describing: large))")
@@ -638,55 +629,119 @@ struct WashingTests {
     /// would have cost anyway.
     @Test func aDrinkDuringCreepIsCountedNetOfCreep() {
         var t = tracker()
-        var now = t0
-        var level = 500.0
-        _ = t.ingest(levelML: level, at: now)
-        for _ in 1...10 {
-            now += 2; level -= 1.3
-            _ = t.ingest(levelML: level, at: now)
-        }
-        now += 40; level -= 0.65 * 40 + 150     // 40 s in the hand, a 150 mL drink
-        guard case .drink(let volume, _, _)? = t.ingest(levelML: level, at: now) else {
+        t.creepMLPerSecond = 0.65
+        _ = t.ingest(levelML: 500, at: t0)
+        let level = 500 - 0.65 * 40 - 150          // 40 s in the hand, a 150 mL drink
+        guard case .drink(let volume, _, _)? = t.ingest(levelML: level, at: t0 + 40) else {
             Issue.record("expected a drink")
             return
         }
-        #expect(abs(volume - 150) < 5, "logged \(volume)")
+        #expect(abs(volume - 150) < 0.01, "logged \(volume)")
     }
 
-    /// Between consecutive readings nothing is discounted: the baseline already followed
-    /// the creep, and a drink measured fifteen seconds after the last reading is whole.
-    @Test func consecutiveReadingsAreNotDiscounted() {
+    /// Between consecutive readings only one interval's creep comes off: fifteen seconds
+    /// at a third of a millilitre a second is five millilitres of a 120 mL drink.
+    @Test func aDrinkBetweenConsecutiveReadingsLosesOneIntervalOfCreep() {
         var t = tracker()
-        var now = t0
-        var level = 500.0
-        _ = t.ingest(levelML: level, at: now)
-        for _ in 1...10 {
-            now += 15; level -= 5
-            _ = t.ingest(levelML: level, at: now)
-        }
-        now += 15; level -= 120
-        guard case .drink(let volume, _, _)? = t.ingest(levelML: level, at: now) else {
+        t.creepMLPerSecond = 1.0 / 3.0
+        _ = t.ingest(levelML: 500, at: t0)
+        guard case .drink(let volume, _, _)? = t.ingest(levelML: 380, at: t0 + 15) else {
             Issue.record("expected a drink")
             return
         }
-        #expect(abs(volume - 120) < 0.001)
+        #expect(abs(volume - 115) < 0.01, "logged \(volume)")
     }
 
-    /// A zero that is wandering back up is not sinking: the learnt rate falls away.
-    @Test func creepForgetsItselfWhenTheZeroTurnsAround() {
+    /// A held drop is confirmed less the creep of the minute it waited.
+    @Test func aHeldDropLosesTheCreepOfItsWait() {
         var t = tracker()
-        var now = t0
-        _ = t.ingest(levelML: 500, at: now)
-        for step in 1...5 {
-            now += 2
-            _ = t.ingest(levelML: 500 - Double(step) * 1.3, at: now)
+        t.creepMLPerSecond = 0.5
+        _ = t.ingest(levelML: 600, at: t0)
+        #expect(t.ingest(levelML: 250, at: t0 + 10) == nil, "held")
+        guard case .drink(let volume, _, _)? = t.ingest(levelML: 220, at: t0 + 70) else {
+            Issue.record("expected a drink")
+            return
         }
-        let learnt = t.creepMLPerSecond
-        #expect(learnt > 0.5)
-        for step in 1...4 {
-            now += 2
-            _ = t.ingest(levelML: 493.5 + Double(step) * 1.3, at: now)
+        // 600 → 220 is 380; 5 mL of the step and 30 mL of the wait were the zero sinking.
+        #expect(abs(volume - 345) < 0.01, "logged \(volume)")
+    }
+
+    /// 17:00:01, the first reading of a relaunched app: 36 mL saved, 18 mL read half a
+    /// minute later, and the creep of the relaunch logged as an 18 mL drink. Restored with
+    /// the time of its last reading and the creep measured by then, the tracker sees the gap.
+    @Test func aRelaunchDuringCreepIsNotADrink() {
+        let saved = (baselineML: 300.0, date: t0, creep: 0.65)
+        var after = tracker()
+        after.reset(baselineML: saved.baselineML, lastReadingAt: saved.date, creepMLPerSecond: saved.creep)
+        let first = after.ingest(levelML: saved.baselineML - 0.65 * 30, at: saved.date + 30)
+        #expect(first == nil, "the relaunch's creep: \(String(describing: first))")
+
+        var again = tracker()
+        again.reset(baselineML: saved.baselineML, lastReadingAt: saved.date, creepMLPerSecond: saved.creep)
+        guard case .drink(let volume, _, _)? = again.ingest(levelML: saved.baselineML - 0.65 * 30 - 100, at: saved.date + 30) else {
+            Issue.record("expected a drink")
+            return
         }
-        #expect(t.creepMLPerSecond < learnt / 8)
+        #expect(abs(volume - 100) < 0.01, "logged \(volume)")
+    }
+}
+
+/// The rate is measured from the weight reports themselves, not from what settles: a
+/// creeping bottle reports every half minute, each report past the stability tolerance
+/// from the last, and nothing settles at all.
+@Suite("Creep")
+struct CreepTests {
+    let t0 = Date(timeIntervalSince1970: 1_000_000)
+    /// The calibration in force on 5 September: 1.418 raw units per mL.
+    func ml(_ raw: Int) -> Double { Double(raw - 22400) / 1.418 }
+
+    /// 17:00:01 to 17:01:14: four reports, 29 and 42 and 2 seconds apart, sinking at half
+    /// a raw unit a second the whole time. Nothing settled until the last two, and the
+    /// 41 raw units between the first and the last were logged as a 29 mL drink.
+    @Test func sparseReportsAtOneRateAreCreep() {
+        var creep = CreepEstimator()
+        creep.observe(levelML: ml(22453), at: t0)
+        creep.observe(levelML: ml(22437), at: t0 + 29)
+        creep.observe(levelML: ml(22413), at: t0 + 71)
+        #expect(creep.mlPerSecond == 0, "two reports are not yet a rate")
+        // One unit in two seconds is 0.35 mL/s: the same slide, and the third report of it.
+        creep.observe(levelML: ml(22412), at: t0 + 73)
+        #expect(abs(creep.mlPerSecond - 0.35) < 0.03, "measured \(creep.mlPerSecond)")
+        creep.observe(levelML: ml(22395), at: t0 + 103)
+        creep.observe(levelML: ml(22379), at: t0 + 133)
+        creep.observe(levelML: ml(22362), at: t0 + 163)
+        #expect(abs(creep.mlPerSecond - 0.39) < 0.05, "measured \(creep.mlPerSecond)")
+    }
+
+    /// One slow drop between two sparse reports is a sip for all anyone knows, and
+    /// teaches nothing — otherwise the sip would discount the next drink.
+    @Test func aSingleSlowDropIsNotARate() {
+        var creep = CreepEstimator()
+        creep.observe(levelML: 500, at: t0)
+        creep.observe(levelML: 470, at: t0 + 60)
+        #expect(creep.mlPerSecond == 0)
+        creep.observe(levelML: 470, at: t0 + 90)
+        #expect(creep.mlPerSecond == 0)
+    }
+
+    /// Picking the bottle up is a cliff, and a cliff is not creep.
+    @Test func handlingIsIgnored() {
+        var creep = CreepEstimator()
+        creep.observe(levelML: 500, at: t0)
+        creep.observe(levelML: -100, at: t0 + 15)
+        creep.observe(levelML: 505, at: t0 + 30)
+        creep.observe(levelML: 20, at: t0 + 45)
+        #expect(creep.mlPerSecond == 0)
+    }
+
+    /// A zero that has stopped sinking is forgotten, report by report. (Jitter of a unit
+    /// downward is not creep and not evidence against it, so it fades at half that pace.)
+    @Test func flatReportsFadeTheRate() {
+        var creep = CreepEstimator(mlPerSecond: 0.5)
+        creep.observe(levelML: 500, at: t0)
+        for step in 1...6 {
+            creep.observe(levelML: 500 + Double(step / 2), at: t0 + Double(step) * 15)
+        }
+        #expect(creep.mlPerSecond < 0.06, "faded to \(creep.mlPerSecond)")
     }
 }

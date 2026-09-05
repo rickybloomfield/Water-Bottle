@@ -17,6 +17,7 @@ public final class CalibrationStore: @unchecked Sendable {
     private let lastRawKey: String
     private let lastRawDateKey: String
     private let believedLevelKey: String
+    private let creepKey: String
 
     public init(defaults: UserDefaults = .standard, keyPrefix: String = "HidrateKit") {
         self.defaults = defaults
@@ -28,6 +29,7 @@ public final class CalibrationStore: @unchecked Sendable {
         lastRawKey = keyPrefix + ".lastRaw"
         lastRawDateKey = keyPrefix + ".lastRawDate"
         believedLevelKey = keyPrefix + ".believedLevelML"
+        creepKey = keyPrefix + ".creepMLPerSecond"
     }
 
     public func loadCalibration() -> BottleCalibration? {
@@ -49,6 +51,17 @@ public final class CalibrationStore: @unchecked Sendable {
 
     public func saveBaselineML(_ value: Double?) {
         if let value { defaults.set(value, forKey: baselineKey) } else { defaults.removeObject(forKey: baselineKey) }
+    }
+
+    /// How fast the zero was sinking when the baseline was last saved, in mL per second.
+    /// Restored with the baseline so a relaunch judges its first reading over the gap
+    /// since the last one, rather than as a step from nowhere.
+    public func loadCreepMLPerSecond() -> Double {
+        defaults.double(forKey: creepKey)
+    }
+
+    public func saveCreepMLPerSecond(_ value: Double) {
+        defaults.set(value, forKey: creepKey)
     }
 
     /// The last settled resting level and when it was seen, used to recover level changes

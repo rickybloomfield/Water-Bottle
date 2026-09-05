@@ -140,7 +140,9 @@ public final class HidrateBottleModel {
             recovered = true
         }
         if tracker.baselineML == nil, let baseline = store?.loadBaselineML() {
-            tracker.reset(baselineML: baseline)
+            let creepRate = store?.loadCreepMLPerSecond() ?? 0
+            creep.reset(mlPerSecond: creepRate)
+            tracker.reset(baselineML: baseline, lastReadingAt: store?.loadLastLevel()?.date, creepMLPerSecond: creepRate)
             recovered = true
         }
         if rememberedRaw == nil, let raw = store?.loadLastRaw()?.raw {
@@ -193,7 +195,9 @@ public final class HidrateBottleModel {
         guard newStore?.keyPrefix != store?.keyPrefix else { return }
         store = newStore
         storedCalibration = newStore?.loadCalibration()
-        tracker.reset(baselineML: newStore?.loadBaselineML())
+        creep.reset(mlPerSecond: newStore?.loadCreepMLPerSecond() ?? 0)
+        tracker.reset(baselineML: newStore?.loadBaselineML(), lastReadingAt: newStore?.loadLastLevel()?.date,
+                      creepMLPerSecond: creep.mlPerSecond)
         if let capacity = storedCalibration?.capacityML { tracker.capacityML = capacity }
         believedLevelML = newStore?.loadBelievedLevelML()
         rememberedRaw = newStore?.loadLastRaw()?.raw
@@ -258,6 +262,9 @@ public final class HidrateBottleModel {
     // agreeing samples within ±8 is the practical definition of "settled".
     private var filter = StableWeightFilter(tolerance: 8, requiredSamples: 2)
     private var tracker = LevelTracker()
+    /// Watches every weight sample for the zero sinking on its own; the tracker discounts
+    /// drops by it. Saved with the baseline so a relaunch starts knowing.
+    private var creep = CreepEstimator()
     private var pendingRecoveryCheck = false
     /// True until the first settled reading of a session, which is the one that has to
     /// account for anything drunk while the bottle was away.
@@ -276,7 +283,9 @@ public final class HidrateBottleModel {
         self.store = store
         storedCalibration = store?.loadCalibration()
         if let baseline = store?.loadBaselineML() {
-            tracker.reset(baselineML: baseline)
+            creep.reset(mlPerSecond: store?.loadCreepMLPerSecond() ?? 0)
+            tracker.reset(baselineML: baseline, lastReadingAt: store?.loadLastLevel()?.date,
+                          creepMLPerSecond: creep.mlPerSecond)
         }
         believedLevelML = store?.loadBelievedLevelML()
         if let raw = store?.loadLastRaw()?.raw {
@@ -498,6 +507,7 @@ public final class HidrateBottleModel {
             }
             if !state.isConnected {
                 filter.reset()
+                creep.reset()
                 tracker.forgetHeldDrink()
                 lastSettled = nil
                 stableStreak = 0
@@ -523,6 +533,10 @@ public final class HidrateBottleModel {
         case .weight(let sample):
             latestWeight = sample
             weightSampleCount += 1
+            if let calibration, calibration.isValid {
+                creep.observe(levelML: calibration.milliliters(forRaw: Double(sample.raw)), at: sample.receivedAt)
+                tracker.creepMLPerSecond = creep.mlPerSecond
+            }
             if let stable = filter.ingest(sample.raw) {
                 stableRaw = stable
                 for continuation in stableSubscribers.values { continuation.yield(stable) }
@@ -590,6 +604,7 @@ public final class HidrateBottleModel {
         if plausible {
             store?.saveBaselineML(tracker.baselineML)
             store?.saveLastLevel(tracker.baselineML ?? levelML, date: date)
+            store?.saveCreepMLPerSecond(creep.mlPerSecond)
         }
 
         // A bottle cannot hold less than nothing, so settled readings that keep arriving
