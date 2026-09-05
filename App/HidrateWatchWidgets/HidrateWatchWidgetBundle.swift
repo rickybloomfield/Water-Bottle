@@ -2,7 +2,7 @@ import SwiftUI
 import WidgetKit
 
 struct WaterComplication: Widget {
-    let kind = "WaterComplication"
+    let kind = HydrationStore.complicationKind
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: HydrationProvider()) { entry in
@@ -17,6 +17,10 @@ struct WaterComplication: Widget {
 
 @main
 struct HidrateWatchWidgetBundle: WidgetBundle {
+    init() {
+        DiagnosticLog.write("widget extension started \(AppVersion.short)")
+    }
+
     var body: some Widget {
         WaterComplication()
     }

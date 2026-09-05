@@ -11,16 +11,26 @@ final class PhoneWatchLink: NSObject {
     private var onDrink: ((PendingDrink) -> Void)?
     /// Brings the app up to date and hands back the result, for answering the watch.
     private var currentSnapshot: (() async -> HydrationSnapshot)?
+    /// Where to write what the link is doing: the session log, in practice.
+    private var log: ((String) -> Void)?
     private var latest: HydrationSnapshot?
-    /// The numbers behind the last complication push, so a budgeted transfer is only
-    /// spent when the face would actually look different.
-    private var lastComplicationTotals: (total: Double, goal: Double)?
+    private static let lastComplicationKey = "watch.lastComplicationFingerprint"
+    /// What the face was last given, so a budgeted transfer is only spent when it would
+    /// look different. Persisted: kept in memory, every launch of this app started from
+    /// nothing and spent one on numbers the face already had — and this app is launched
+    /// dozens of times on a day it is being worked on, against a budget of fifty.
+    private var lastComplicationFingerprint: String? {
+        get { UserDefaults.standard.string(forKey: Self.lastComplicationKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.lastComplicationKey) }
+    }
 
     func activate(onDrink: @escaping (PendingDrink) -> Void,
-                  currentSnapshot: @escaping () async -> HydrationSnapshot) {
+                  currentSnapshot: @escaping () async -> HydrationSnapshot,
+                  log: @escaping (String) -> Void) {
         self.onDrink = onDrink
         self.currentSnapshot = currentSnapshot
-        guard WCSession.isSupported() else { return }
+        self.log = log
+        guard WCSession.isSupported() else { return log("watch: WCSession unsupported") }
         let session = WCSession.default
         session.delegate = self
         session.activate()
@@ -31,14 +41,18 @@ final class PhoneWatchLink: NSObject {
         latest = snapshot
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
-        guard session.activationState == .activated, session.isPaired, session.isWatchAppInstalled else { return }
+        guard session.activationState == .activated, session.isPaired, session.isWatchAppInstalled else {
+            return log?("watch: publish held until activation; \(Self.describe(session))") ?? ()
+        }
         let payload = WatchMessage.encode(snapshot, forKey: WatchMessage.snapshotKey)
+        var route = "context"
         do {
             try session.updateApplicationContext(payload)
         } catch {
             // The context is the fast path and it can refuse (a session that has just
             // gone inactive, for one). Fall back to a queued transfer rather than
             // silently dropping the update until something else changes.
+            route = "userInfo, context refused: \(error.localizedDescription)"
             session.transferUserInfo(payload)
         }
 
@@ -46,35 +60,86 @@ final class PhoneWatchLink: NSObject {
         // leave the complication showing this morning's number all day. A complication
         // transfer wakes the watch — but the daily budget is small, so spend one only
         // when the number on the face changes.
-        let totals = (snapshot.totalML, snapshot.goalML)
-        guard session.isComplicationEnabled,
-              session.remainingComplicationUserInfoTransfers > 0,
-              lastComplicationTotals?.total != totals.0 || lastComplicationTotals?.goal != totals.1
-        else { return }
-        lastComplicationTotals = totals
+        let changed = lastComplicationFingerprint != snapshot.displayFingerprint
+        let spend = session.isComplicationEnabled && session.remainingComplicationUserInfoTransfers > 0 && changed
+        log?("watch: published [\(snapshot.summary)] via \(route); \(Self.describe(session)); faceWouldChange=\(changed) -> \(spend ? "complication transfer" : "no complication transfer")")
+        guard spend else { return }
+        lastComplicationFingerprint = snapshot.displayFingerprint
         session.transferCurrentComplicationUserInfo(payload)
     }
 
     private func republish() {
         if let latest { publish(latest) }
     }
+
+    nonisolated static func describe(_ session: WCSession) -> String {
+        "state=\(label(session.activationState)) paired=\(session.isPaired) installed=\(session.isWatchAppInstalled) complicationEnabled=\(session.isComplicationEnabled) remainingComplicationTransfers=\(session.remainingComplicationUserInfoTransfers) reachable=\(session.isReachable) outstanding=\(session.outstandingUserInfoTransfers.count) contentPending=\(session.hasContentPending)"
+    }
+
+    nonisolated static func label(_ state: WCSessionActivationState) -> String {
+        switch state {
+        case .notActivated: "notActivated"
+        case .inactive: "inactive"
+        case .activated: "activated"
+        @unknown default: "unknown(\(state.rawValue))"
+        }
+    }
 }
 
 extension PhoneWatchLink: WCSessionDelegate {
     nonisolated func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
-        Task { @MainActor in self.republish() }
+        let line = "watch: activation \(Self.label(activationState)) error=\(error.map { "\($0)" } ?? "none"); \(Self.describe(session))"
+        Task { @MainActor in
+            self.log?(line)
+            self.republish()
+        }
     }
 
-    nonisolated func sessionDidBecomeInactive(_ session: WCSession) {}
+    nonisolated func sessionDidBecomeInactive(_ session: WCSession) {
+        Task { @MainActor in self.log?("watch: session inactive") }
+    }
 
     /// Happens when the user switches watches; reactivate for the new one.
     nonisolated func sessionDidDeactivate(_ session: WCSession) {
+        Task { @MainActor in self.log?("watch: session deactivated; reactivating") }
         WCSession.default.activate()
     }
 
+    /// Pairing, installation or the complication's presence on the active face changed.
+    nonisolated func sessionWatchStateDidChange(_ session: WCSession) {
+        let line = "watch: state changed; \(Self.describe(session))"
+        Task { @MainActor in self.log?(line) }
+    }
+
+    nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
+        let line = "watch: reachable=\(session.isReachable)"
+        Task { @MainActor in self.log?(line) }
+    }
+
+    nonisolated func session(_ session: WCSession, didFinish userInfoTransfer: WCSessionUserInfoTransfer, error: Error?) {
+        let line = "watch: transfer finished complication=\(userInfoTransfer.isCurrentComplicationInfo) error=\(error.map { "\($0)" } ?? "none"); remainingComplicationTransfers=\(session.remainingComplicationUserInfoTransfers)"
+        let failedComplication = userInfoTransfer.isCurrentComplicationInfo && error != nil
+        Task { @MainActor in
+            self.log?(line)
+            // The face never got it; let the next publish try again.
+            if failedComplication { self.lastComplicationFingerprint = nil }
+        }
+    }
+
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        // The watch's diagnostic log, shipped here because here is where it can be read.
+        if let text = userInfo[WatchMessage.logKey] as? String {
+            let lines = text.split(separator: "\n").map(String.init)
+            Task { @MainActor in
+                for line in lines { self.log?("watchlog \(line)") }
+            }
+            return
+        }
         guard let drink = WatchMessage.decode(PendingDrink.self, from: userInfo, key: WatchMessage.drinkKey) else { return }
-        Task { @MainActor in self.onDrink?(drink) }
+        Task { @MainActor in
+            self.log?("watch: drink \(Int(drink.volumeML))mL arrived as userInfo")
+            self.onDrink?(drink)
+        }
     }
 
     /// The watch asking for the current numbers, with somewhere to put the answer. This
@@ -84,16 +149,22 @@ extension PhoneWatchLink: WCSessionDelegate {
                              replyHandler: @escaping ([String: Any]) -> Void) {
         let drink = WatchMessage.decode(PendingDrink.self, from: message, key: WatchMessage.drinkKey)
         let reply = UncheckedBox(replyHandler)
+        let keys = Array(message.keys).sorted()
         Task { @MainActor in
+            self.log?("watch: message \(keys) wants a reply")
             if let drink { self.onDrink?(drink) }
             let snapshot = await self.currentSnapshot?() ?? self.latest
             reply.value(snapshot.map { WatchMessage.encode($0, forKey: WatchMessage.snapshotKey) } ?? [:])
+            self.log?("watch: replied [\(snapshot?.summary ?? "nothing")]")
         }
     }
 
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
         guard message[WatchMessage.requestKey] != nil else { return }
-        Task { @MainActor in self.republish() }
+        Task { @MainActor in
+            self.log?("watch: request without a reply handler; republishing")
+            self.republish()
+        }
     }
 }
 

@@ -40,6 +40,7 @@ extension AppState {
     /// comes forward, on a background refresh, and when the watch asks for the current
     /// numbers — that last one is what carries a widget tap through to the wrist.
     func catchUp() async {
+        absorbGroupDiagnostics()
         adoptPendingDrinks()
         await refreshHealthTotal()
         await refreshStreak()
@@ -80,6 +81,13 @@ extension AppState {
 // MARK: - Diagnostics
 
 extension AppState {
+    /// The widget can only write to the group container; move what it wrote into the
+    /// session log, where it can be read.
+    func absorbGroupDiagnostics() {
+        guard let text = DiagnosticLog.drain() else { return }
+        for line in text.split(separator: "\n") { sessionLog.write("grouplog \(line)") }
+    }
+
     /// Write down what every source says a day holds, so a row and the day it opens
     /// disagreeing can be read off the log rather than guessed at.
     func logDayBreakdown(_ day: Date, listedTotalML: Double?, calendar: Calendar = .current) async {

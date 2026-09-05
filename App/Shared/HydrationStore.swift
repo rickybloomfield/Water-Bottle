@@ -81,10 +81,40 @@ enum HydrationStore {
         replacePending(with: remaining)
     }
 
+    // MARK: - Diagnostics
+
+    private static let lastTimelineKey = "diag.lastGetTimeline"
+
+    /// The provider notes each run here, where the app can read it back.
+    static func noteTimelineRun(family: String, at date: Date) {
+        defaults.set("\(DiagnosticLog.stamp(date)) \(family) pid=\(ProcessInfo.processInfo.processIdentifier)", forKey: lastTimelineKey)
+    }
+
+    static var lastTimelineRun: String { defaults.string(forKey: lastTimelineKey) ?? "never" }
+
+    private static let renderedKey = "widget.renderedFingerprint"
+
+    /// What the provider drew the last time it ran, so the app can tell whether a reload
+    /// would change anything before spending one. Reloads come out of a daily budget,
+    /// and asking for one on every message from the phone — most of them carrying the
+    /// same numbers — is what used up the complication's.
+    static func noteRendered(_ snapshot: HydrationSnapshot) {
+        defaults.set(snapshot.displayFingerprint, forKey: renderedKey)
+    }
+
+    static var renderedFingerprint: String? { defaults.string(forKey: renderedKey) }
+
     // MARK: - Refresh
 
+    /// The complication's `kind`, so the watch can ask for it by name.
+    static let complicationKind = "WaterComplication"
+
     static func reloadWidgets() {
-        #if canImport(WidgetKit)
+        #if os(watchOS)
+        // By name rather than all at once: the watch has ignored every all-timelines
+        // request it was sent, and there are reports of that call alone being broken.
+        WidgetCenter.shared.reloadTimelines(ofKind: complicationKind)
+        #elseif canImport(WidgetKit)
         WidgetCenter.shared.reloadAllTimelines()
         #endif
     }

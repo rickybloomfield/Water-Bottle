@@ -78,6 +78,11 @@ struct HydrationSnapshot: Codable, Hashable, Sendable {
             && acknowledgedDrinkIDs == other.acknowledgedDrinkIDs
     }
 
+    /// `matchesDisplay` as a value, for remembering what a face was last given.
+    var displayFingerprint: String {
+        "\(Int(day.timeIntervalSince1970))|\(totalML)|\(goalML)|\(unit.rawValue)|\(windowStart)|\(windowEnd)|\(acknowledgedDrinkIDs.count)"
+    }
+
     var presetsML: [Double] { unit.presetsML }
 
     /// "12 oz to go" / "Goal reached", for the line under a ring.

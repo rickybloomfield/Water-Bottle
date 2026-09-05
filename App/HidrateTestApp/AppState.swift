@@ -318,6 +318,8 @@ final class AppState {
             guard let self else { return HydrationSnapshot() }
             await self.catchUp()
             return self.snapshot
+        } log: { [weak self] line in
+            self?.sessionLog.write(line)
         }
         model.onLevelChange = { [weak self] event in self?.handle(event) }
         model.onSettledReading = { [weak self] reading in
@@ -358,6 +360,7 @@ final class AppState {
         // Always write once at launch, so a fresh install has a real snapshot to read
         // rather than whatever the defaults happen to be.
         publishSnapshot(force: true)
+        absorbGroupDiagnostics()
         Task { await refreshHealthTotal() }
         refreshStreakSoon()
     }

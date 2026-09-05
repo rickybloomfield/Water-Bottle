@@ -45,6 +45,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     static func scheduleRefresh() {
         let request = BGAppRefreshTaskRequest(identifier: refreshTaskIdentifier)
         request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
-        try? BGTaskScheduler.shared.submit(request)
+        do {
+            try BGTaskScheduler.shared.submit(request)
+        } catch {
+            // Not one refresh has run in days of logs; if the ask itself is refused, say so.
+            let reason = "\(error)"
+            Task { @MainActor in AppState.shared.sessionLog.write("background refresh not scheduled: \(reason)") }
+        }
     }
 }
