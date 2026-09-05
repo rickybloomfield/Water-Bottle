@@ -58,13 +58,15 @@ struct DrinkItemRow: View {
             if entry.healthKitUUID == nil {
                 Button("Save to Health", systemImage: "heart") { Task { await app.logToHealth(entry) } }
             }
-            // The role reddens the title on its own but leaves the symbol on the tint,
-            // so the label says red as well.
+            // The destructive role reddens the title but leaves the symbol on the app's
+            // accent, and a foreground style on the label doesn't reach how a menu draws
+            // it. The tint does, so the tint is what's set.
             Button(role: .destructive) {
                 onDelete(entry)
             } label: {
-                Label("Delete", systemImage: "trash").foregroundStyle(.red)
+                Label("Delete", systemImage: "trash")
             }
+            .tint(.red)
         }
     }
 

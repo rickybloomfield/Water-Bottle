@@ -30,7 +30,7 @@ struct DayDetailView: View {
             .sheet(item: $detail) { item in
                 DrinkDetailView(item: item) { entry in pendingDelete = entry }
             }
-            .sheet(isPresented: $addingDrink) { AddDrinkView(day: day) }
+            .sheet(isPresented: $addingDrink) { AddDrinkView(day: day, startingAt: app.unit.defaultDrinkML) }
             .alert("Delete this drink?",
                    isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
                    presenting: pendingDelete) { entry in
@@ -49,8 +49,15 @@ struct AddDrinkView: View {
     @Environment(\.dismiss) private var dismiss
 
     let day: Date
-    @State private var volumeML: Double = 8 * VolumeUnit.mlPerOunce
+    @State private var volumeML: Double
     @State private var time = Date()
+
+    /// The starting amount comes from the caller because the unit lives in the
+    /// environment, which a `@State` initialiser cannot reach.
+    init(day: Date, startingAt volumeML: Double) {
+        self.day = day
+        _volumeML = State(initialValue: volumeML)
+    }
 
     var body: some View {
         NavigationStack {

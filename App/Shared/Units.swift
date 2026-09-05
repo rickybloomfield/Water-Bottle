@@ -25,6 +25,9 @@ enum VolumeUnit: String, CaseIterable, Identifiable, Codable, Sendable {
     /// Sensible increment for a manual drink, in mL.
     var drinkStepML: Double { self == .ounces ? Self.mlPerOunce * 0.5 : 10 }
 
+    /// What a drink logged by hand starts at: a glass, in whichever unit you think in.
+    var defaultDrinkML: Double { self == .ounces ? Self.mlPerOunce * 12 : 350 }
+
     /// One-tap amounts, offered in the app's log sheet and on the watch.
     var presetsML: [Double] {
         self == .ounces

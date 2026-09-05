@@ -72,7 +72,7 @@ struct TodayView: View {
                     Button("Log a drink", systemImage: "plus") { showManualAdd = true }
                 }
             }
-            .sheet(isPresented: $showManualAdd) { AddDrinkView(day: selectedDay) }
+            .sheet(isPresented: $showManualAdd) { AddDrinkView(day: selectedDay, startingAt: app.unit.defaultDrinkML) }
             .sheet(item: $detail) { item in
                 DrinkDetailView(item: item) { entry in pendingDelete = entry }
             }
