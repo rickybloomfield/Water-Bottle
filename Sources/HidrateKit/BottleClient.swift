@@ -147,7 +147,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         subscribersLock.withLock { subscribers[id] = continuation }
         continuation.onTermination = { [weak self] _ in
             guard let self else { return }
-            self.subscribersLock.withLock { _ = self.subscribers.removeValue(forKey: id) }
+            subscribersLock.withLock { [self] in _ = subscribers.removeValue(forKey: id) }
         }
         queue.async { [weak self] in
             guard let self else { return }
@@ -206,7 +206,10 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     /// `period`. A bottle advertises often enough to be caught by a short window, and the
     /// connected one is asked for its own signal strength at the same moment.
     public func setProximityListening(_ enabled: Bool, window: TimeInterval = 6, period: TimeInterval = 45) {
-        queue.async {
+        // Strong on purpose, and said out loud: the timer it installs holds `self`
+        // weakly, and a capture that differs from the one around it has to be written
+        // down rather than inferred.
+        queue.async { [self] in
             self.proximityTimer?.cancel()
             self.proximityTimer = nil
             self.proximityWindow = window
@@ -280,7 +283,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     }
 
     public func connect(to identifier: UUID, name: String? = nil) {
-        queue.async {
+        queue.async { [self] in
             self.targetIdentifier = identifier
             self.wantsConnection = true
             UserDefaults.standard.set(identifier.uuidString, forKey: Self.lastBottleKey)
@@ -355,7 +358,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     /// foreground). If a connect has been pending too long, it is cancelled and re-issued,
     /// and the by-name reconnect scan is (re)started.
     public func nudgeReconnect() {
-        queue.async {
+        queue.async { [self] in
             guard self.wantsConnection, self.central.state == .poweredOn else { return }
             if self.sessionActive {
                 // If a restored session is wedged in discovery, break it.

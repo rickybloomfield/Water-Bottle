@@ -182,7 +182,11 @@ public final class HealthKitWaterLogger: @unchecked Sendable {
     public func startObservingWater(_ onChange: @escaping @Sendable (@escaping @Sendable () -> Void) -> Void) {
         stopObservingWater()
         let query = HKObserverQuery(sampleType: waterType, predicate: nil) { _, completion, _ in
-            onChange { completion() }
+            // HealthKit's completion handler is safe to call from any thread — the SDK
+            // simply doesn't say so in its type, so it can't cross into a `@Sendable`
+            // closure on its own without being vouched for.
+            nonisolated(unsafe) let finished = completion
+            onChange { finished() }
         }
         observerQuery = query
         store.execute(query)
