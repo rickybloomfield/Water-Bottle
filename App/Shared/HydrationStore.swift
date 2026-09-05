@@ -19,13 +19,15 @@ enum HydrationStore {
 
     // MARK: - Snapshot
 
-    /// The last snapshot the phone published, exactly as written.
-    static func storedSnapshot() -> HydrationSnapshot {
-        guard let data = defaults.data(forKey: Keys.snapshot),
-              let snapshot = try? JSONDecoder().decode(HydrationSnapshot.self, from: data)
-        else { return HydrationSnapshot() }
-        return snapshot
+    /// The last snapshot the phone published, exactly as written, or nil if it never has:
+    /// a fresh install, or on the watch a reinstall, which empties the group container.
+    static func storedSnapshotIfAny() -> HydrationSnapshot? {
+        guard let data = defaults.data(forKey: Keys.snapshot) else { return nil }
+        return try? JSONDecoder().decode(HydrationSnapshot.self, from: data)
     }
+
+    /// The stored snapshot, or an empty day when there is none.
+    static func storedSnapshot() -> HydrationSnapshot { storedSnapshotIfAny() ?? HydrationSnapshot() }
 
     static func save(_ snapshot: HydrationSnapshot) {
         guard let data = try? JSONEncoder().encode(snapshot) else { return }

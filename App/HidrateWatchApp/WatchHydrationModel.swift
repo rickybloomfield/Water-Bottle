@@ -84,14 +84,17 @@ final class WatchHydrationModel {
     }
 
     private func adopt(_ incoming: HydrationSnapshot, via route: String) {
-        let stored = HydrationStore.storedSnapshot()
+        let stored = HydrationStore.storedSnapshotIfAny()
         defer {
             onConnectivityActivity?()
             link.shipDiagnostics()
         }
         // The context waiting at activation can predate a reply already taken; going
-        // backwards would put an older number on the face until the next message.
-        guard incoming.updated >= stored.updated else {
+        // backwards would put an older number on the face until the next message. Only
+        // measured against something actually stored: an empty store's stand-in is
+        // stamped with this watch's clock, later than anything the phone ever sent, and
+        // comparing against that rejected every snapshot after a reinstall.
+        if let stored, incoming.updated < stored.updated {
             return DiagnosticLog.write("adopt via \(route) ignored: incoming=[\(incoming.summary)] is older than stored=[\(stored.summary)]")
         }
         HydrationStore.save(incoming)
@@ -99,7 +102,7 @@ final class WatchHydrationModel {
         HydrationStore.removePending(ids: incoming.acknowledgedDrinkIDs)
         snapshot = HydrationStore.currentSnapshot()
         pendingCount = HydrationStore.pendingDrinks().count
-        DiagnosticLog.write("adopt via \(route) app=\(DiagnosticLog.appState) incoming=[\(incoming.summary)] over stored=[\(stored.summary)]")
+        DiagnosticLog.write("adopt via \(route) app=\(DiagnosticLog.appState) incoming=[\(incoming.summary)] over stored=[\(stored?.summary ?? "nothing")]")
         reloadComplicationIfNeeded(reason: "adopt via \(route)")
     }
 }
