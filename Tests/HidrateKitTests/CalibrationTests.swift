@@ -552,3 +552,141 @@ struct ZeroDriftWatcherTests {
         #expect(moved)
     }
 }
+
+/// Washing the bottle, from the session log of 5 September 2026: the sensor came off, the
+/// bottle was emptied, and the two went back together. Four drinks were logged — 97, 1008,
+/// 23 and 211 mL — from a 621 mL bottle nobody drank from. Levels are as the calibration in
+/// force read them (its zero had wandered a long way up; the tracker only ever uses steps).
+@Suite("Washing the bottle")
+struct WashingTests {
+    let capacity = 621.0
+    let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    func tracker() -> LevelTracker { LevelTracker(capacityML: 621) }
+
+    /// 16:34:58: resting at 1521 mL before the wash, the emptied bottle read 822 and sat
+    /// there, creeping, for the best part of a minute. Then a gap, and 513 at 16:42:50 —
+    /// which confirmed the drop as a 1008 mL drink. No drop past what the bottle holds is
+    /// water: the bottle was emptied, and after a minute the baseline goes to where it is.
+    @Test func anEmptiedBottleBecomesTheNewBaselineNotADrink() {
+        var t = tracker()
+        t.reset(baselineML: 1521)
+        var changes: [LevelChange?] = []
+        changes.append(t.ingest(levelML: 822, at: t0))
+        for step in 1...20 {
+            changes.append(t.ingest(levelML: 814 - Double(step) * 1.4, at: t0 + 9 + Double(step) * 2))
+        }
+        #expect(changes.allSatisfy { $0?.isDrink != true }, "nothing here was drunk")
+        #expect(t.baselineML == 1521, "held: the bottle could still be set back down")
+        let later = t.ingest(levelML: 513, at: t0 + 472)
+        #expect(later?.isDrink == false, "a 1008 mL drink out of a 621 mL bottle: \(String(describing: later))")
+        #expect(later?.isHandled == true)
+        #expect(t.baselineML == 513, "it stayed: the empty bottle is the new baseline")
+    }
+
+    /// The same thing seen the other way: a drop held as a possible drink that then goes
+    /// further down than the bottle could have given is a move, however long it has waited.
+    @Test func aHeldDropBiggerThanTheBottleIsNeverConfirmed() {
+        var t = tracker()
+        _ = t.ingest(levelML: 600, at: t0)
+        #expect(t.ingest(levelML: 250, at: t0 + 15) == nil, "half a bottleful: held")
+        let further = t.ingest(levelML: -55, at: t0 + 90)
+        #expect(further?.isDrink != true, "got \(String(describing: further))")
+        #expect(further?.isHandled == true)
+    }
+
+    /// Picking the bottle up still works as before: a lift and a set-down within seconds
+    /// leave the baseline where it was, with nothing logged.
+    @Test func aLiftThatComesBackIsStillNothing() {
+        var t = tracker()
+        _ = t.ingest(levelML: 500, at: t0)
+        #expect(t.ingest(levelML: -200, at: t0 + 15)?.isHandled == true)
+        #expect(t.ingest(levelML: 502, at: t0 + 30) == nil)
+        #expect(t.baselineML == 500)
+    }
+
+    /// 16:43 to 16:50: the re-seated load cell sank at about 0.65 mL a second, which the
+    /// baseline followed in 1.3 mL steps every two seconds — until handling broke the
+    /// stream, and the creep that had built up meanwhile came back as a step: 23 mL over
+    /// 43 seconds, then 211 mL over six and a half minutes. Both logged as drinks.
+    @Test func creepAcrossAGapIsNotADrink() {
+        var t = tracker()
+        var now = t0
+        var level = 513.0
+        _ = t.ingest(levelML: level, at: now)
+        for _ in 1...10 {
+            now += 2; level -= 1.3
+            #expect(t.ingest(levelML: level, at: now) == nil)
+        }
+        #expect(abs(t.creepMLPerSecond - 0.65) < 0.05, "learnt \(t.creepMLPerSecond)")
+
+        now += 43; level -= 0.65 * 43
+        let small = t.ingest(levelML: level, at: now)
+        #expect(small == nil, "43 s of creep: \(String(describing: small))")
+
+        for _ in 1...5 {
+            now += 2; level -= 1.3
+            _ = t.ingest(levelML: level, at: now)
+        }
+        now += 390; level -= 0.65 * 390
+        let large = t.ingest(levelML: level, at: now)
+        #expect(large == nil, "six minutes of creep: \(String(describing: large))")
+        #expect(t.baselineML == level, "the baseline followed it, as it would have step by step")
+    }
+
+    /// A drink taken while the sensor is creeping is still a drink, less the creep the gap
+    /// would have cost anyway.
+    @Test func aDrinkDuringCreepIsCountedNetOfCreep() {
+        var t = tracker()
+        var now = t0
+        var level = 500.0
+        _ = t.ingest(levelML: level, at: now)
+        for _ in 1...10 {
+            now += 2; level -= 1.3
+            _ = t.ingest(levelML: level, at: now)
+        }
+        now += 40; level -= 0.65 * 40 + 150     // 40 s in the hand, a 150 mL drink
+        guard case .drink(let volume, _, _)? = t.ingest(levelML: level, at: now) else {
+            Issue.record("expected a drink")
+            return
+        }
+        #expect(abs(volume - 150) < 5, "logged \(volume)")
+    }
+
+    /// Between consecutive readings nothing is discounted: the baseline already followed
+    /// the creep, and a drink measured fifteen seconds after the last reading is whole.
+    @Test func consecutiveReadingsAreNotDiscounted() {
+        var t = tracker()
+        var now = t0
+        var level = 500.0
+        _ = t.ingest(levelML: level, at: now)
+        for _ in 1...10 {
+            now += 15; level -= 5
+            _ = t.ingest(levelML: level, at: now)
+        }
+        now += 15; level -= 120
+        guard case .drink(let volume, _, _)? = t.ingest(levelML: level, at: now) else {
+            Issue.record("expected a drink")
+            return
+        }
+        #expect(abs(volume - 120) < 0.001)
+    }
+
+    /// A zero that is wandering back up is not sinking: the learnt rate falls away.
+    @Test func creepForgetsItselfWhenTheZeroTurnsAround() {
+        var t = tracker()
+        var now = t0
+        _ = t.ingest(levelML: 500, at: now)
+        for step in 1...5 {
+            now += 2
+            _ = t.ingest(levelML: 500 - Double(step) * 1.3, at: now)
+        }
+        let learnt = t.creepMLPerSecond
+        #expect(learnt > 0.5)
+        for step in 1...4 {
+            now += 2
+            _ = t.ingest(levelML: 493.5 + Double(step) * 1.3, at: now)
+        }
+        #expect(t.creepMLPerSecond < learnt / 8)
+    }
+}

@@ -490,6 +490,11 @@ public final class HidrateBottleModel {
                 // against the level saved before we disconnected.
                 pendingRecoveryCheck = recoverAcrossDisconnects
                 awaitingFirstSettledReading = true
+                // A session can start over without a disconnect in between — a second
+                // connect attempt completing on the bottle's old address, for one — and
+                // a drop held from the last one would be confirmed against a reading
+                // taken minutes later. It was for the recovery check to judge.
+                tracker.forgetHeldDrink()
             }
             if !state.isConnected {
                 filter.reset()
@@ -680,7 +685,13 @@ public final class HidrateBottleModel {
         // recovered refill.
         let observedDrop = previous.levelML - currentLevelML
         guard observedDrop > 0 else { return false }
-        let corrected = driftModel.correctedDrop(observedDrop: observedDrop, gapSeconds: gap)
+        // The drift model assumes the load cell's usual creep. A sensor just re-seated
+        // sinks far faster, and the tracker has been measuring it; when it has, that rate
+        // is what the gap cost, however much of the drop it accounts for.
+        let measuredPerMinute = tracker.creepMLPerSecond * 60
+        let corrected = measuredPerMinute > driftModel.mlPerMinute
+            ? max(observedDrop - measuredPerMinute * gap / 60, 0)
+            : driftModel.correctedDrop(observedDrop: observedDrop, gapSeconds: gap)
         guard corrected >= tracker.configuration.minDrinkML else { return false }
         let midpoint = previous.date.addingTimeInterval(gap / 2)
         let change = LevelChange.drink(volumeML: corrected, fromML: previous.levelML, toML: currentLevelML)
