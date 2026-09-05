@@ -28,9 +28,15 @@ extension AppState {
     /// the budget on nothing and left real changes to arrive late.
     func publishSnapshot(force: Bool = false) {
         let snapshot = snapshot
-        guard force || !snapshot.matchesDisplay(of: HydrationStore.storedSnapshot()) else { return }
+        let changed = HydrationStore.storedSnapshotIfAny().map { !snapshot.matchesDisplay(of: $0) } ?? true
+        guard force || changed else { return }
         HydrationStore.save(snapshot)
-        HydrationStore.reloadWidgets()
+        // A forced publish — every launch — writes the store and tells the watch, but only
+        // a change earns a widget reload. At launch the app is not yet in the foreground,
+        // so that reload counts against the widget's daily budget, and on a day this app
+        // is launched dozens of times the budget was gone by mid-afternoon: the widget
+        // then sat on an old number while the provider was never run for the new one.
+        if changed { HydrationStore.reloadWidgets() }
         PhoneWatchLink.shared.publish(snapshot)
         Task { await rescheduleReminders() }
     }
