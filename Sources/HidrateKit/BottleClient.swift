@@ -206,9 +206,8 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     /// `period`. A bottle advertises often enough to be caught by a short window, and the
     /// connected one is asked for its own signal strength at the same moment.
     public func setProximityListening(_ enabled: Bool, window: TimeInterval = 6, period: TimeInterval = 45) {
-        // Strong on purpose, and said out loud: the timer it installs holds `self`
-        // weakly, and a capture that differs from the one around it has to be written
-        // down rather than inferred.
+        // Strong on purpose, and said so: the timer it installs holds `self` weakly, and
+        // two captures that differ read better spelled out than inferred.
         queue.async { [self] in
             self.proximityTimer?.cancel()
             self.proximityTimer = nil
