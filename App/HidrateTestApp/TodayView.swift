@@ -88,6 +88,11 @@ struct TodayView: View {
             // Horizontal only: scroll-indicator visibility travels down the environment,
             // and hiding both axes took the drinks list's own scroll bar with it.
             .scrollIndicators(.hidden, axes: .horizontal)
+            // Today is the last page, and pulling past it shows whatever is behind the
+            // pager. Left to itself that is the window, white in light mode against the
+            // grey of the day's list; in the list's own colour the bounce reads as the
+            // day giving a little rather than as a gap.
+            .background(Color(.systemGroupedBackground).ignoresSafeArea())
             // The rail is part of the safe area rather than a sibling stacked above it.
             // Stacking it left each page ending at the tab bar instead of the screen, and
             // a list that stops short of the bar has nothing to scroll behind it.
