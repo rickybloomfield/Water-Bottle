@@ -107,7 +107,8 @@ struct AddDrinkView: View {
             .navigationTitle(isToday ? "Log a drink" : "Add a drink")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                // On the right, under the plus that opened the sheet.
+                ToolbarItem(placement: .topBarTrailing) { Button("Cancel") { dismiss() } }
             }
         }
         .presentationDetents([.medium, .large])
