@@ -17,6 +17,7 @@ public final class CalibrationStore: @unchecked Sendable {
     private let lastRawKey: String
     private let lastRawDateKey: String
     private let believedLevelKey: String
+    private let believedLevelSetAtKey: String
     private let creepKey: String
 
     public init(defaults: UserDefaults = .standard, keyPrefix: String = "HidrateKit") {
@@ -29,6 +30,7 @@ public final class CalibrationStore: @unchecked Sendable {
         lastRawKey = keyPrefix + ".lastRaw"
         lastRawDateKey = keyPrefix + ".lastRawDate"
         believedLevelKey = keyPrefix + ".believedLevelML"
+        believedLevelSetAtKey = keyPrefix + ".believedLevelSetAt"
         creepKey = keyPrefix + ".creepMLPerSecond"
     }
 
@@ -107,11 +109,21 @@ public final class CalibrationStore: @unchecked Sendable {
         if let value { defaults.set(value, forKey: believedLevelKey) } else { defaults.removeObject(forKey: believedLevelKey) }
     }
 
+    /// When the believed level was last set outright rather than moved. See
+    /// `HidrateBottleModel.believedLevelSetAt`.
+    public func loadBelievedLevelSetAt() -> Date? {
+        defaults.object(forKey: believedLevelSetAtKey) as? Date
+    }
+
+    public func saveBelievedLevelSetAt(_ value: Date?) {
+        if let value { defaults.set(value, forKey: believedLevelSetAtKey) } else { defaults.removeObject(forKey: believedLevelSetAtKey) }
+    }
+
     /// Throw away everything saved for this bottle. Used when one is removed, so adding it
     /// back later starts from nothing rather than from a calibration nobody remembers.
     public func erase() {
         for key in [calibrationKey, baselineKey, lastLevelKey, lastLevelDateKey,
-                    lastRawKey, lastRawDateKey, believedLevelKey] {
+                    lastRawKey, lastRawDateKey, believedLevelKey, believedLevelSetAtKey, creepKey] {
             defaults.removeObject(forKey: key)
         }
     }

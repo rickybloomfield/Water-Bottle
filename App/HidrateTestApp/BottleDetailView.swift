@@ -11,7 +11,13 @@ struct BottleDetailView: View {
     @State private var draftName = ""
     @State private var confirmDisconnect = false
     @State private var confirmForget = false
-    @State private var rezeroMessage: String?
+    @State private var pendingOverride: LevelOverride?
+
+    /// The two things the scale can't know on its own, said outright.
+    private enum LevelOverride: Identifiable {
+        case empty, full
+        var id: Self { self }
+    }
 
     private var bottle: SavedBottle? { app.roster[bottleID] }
     private var isActive: Bool { app.roster.activeID == bottleID }
@@ -34,9 +40,40 @@ struct BottleDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { draftName = bottle?.displayName ?? "" }
         .onDisappear { commitName() }
-        .alert("Zero set", isPresented: Binding(get: { rezeroMessage != nil }, set: { if !$0 { rezeroMessage = nil } })) {
-            Button("OK", role: .cancel) {}
-        } message: { Text(rezeroMessage ?? "") }
+        .alert("Bottle is empty?", isPresented: overrideBinding(.empty)) {
+            if let remaining = app.remainingInBottleML {
+                Button("Log \(app.volume(remaining)) and set empty") { app.markEmpty(loggingRemainder: true) }
+                Button("Set empty only") { app.markEmpty(loggingRemainder: false) }
+            } else {
+                Button("Set empty") { app.markEmpty(loggingRemainder: false) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(emptyMessage)
+        }
+        .alert("Bottle is full?", isPresented: overrideBinding(.full)) {
+            Button("Set full") { app.markFull() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(fullMessage)
+        }
+    }
+
+    private func overrideBinding(_ which: LevelOverride) -> Binding<Bool> {
+        Binding(get: { pendingOverride == which }, set: { if !$0 { pendingOverride = nil } })
+    }
+
+    private var emptyMessage: String {
+        var text = "The scale's current reading becomes empty, so the bottle reads 0 and the next refill is measured from it. Calibration is untouched."
+        if let remaining = app.remainingInBottleML {
+            text += "\n\nThe app thought \(app.volume(remaining)) was still in it. If you drank that, log it too."
+        }
+        return text
+    }
+
+    private var fullMessage: String {
+        let capacity = model.calibration.map { app.volume($0.capacityML) } ?? "a full bottle"
+        return "The level is set to \(capacity), and the zero moves to match the scale's current reading, so the next drink measures from a full bottle. Calibration is untouched."
     }
 
     // MARK: - Hero
@@ -72,10 +109,22 @@ struct BottleDetailView: View {
                             .foregroundStyle(isConnected ? Color.green : Color.secondary)
                     }
                     .padding(.top, 6)
-                    Text(lastReadingLine(bottle))
+                    if isConnected, model.stableRaw == nil {
+                        // The scale reports every fifteen seconds and two reports have to
+                        // agree before there is a reading to act on; the level line and
+                        // the Empty and Full buttons wait for that.
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.mini)
+                            Text("Loading details…")
+                        }
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text(lastReadingLine(bottle))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 Spacer(minLength: 0)
             }
@@ -117,7 +166,7 @@ struct BottleDetailView: View {
     private func trustSection(_ bottle: SavedBottle) -> some View {
         Section {
             calibrationRow(bottle)
-            if isConnected { rezeroButton }
+            if isConnected { overrideRow }
             if isConnected, let battery = model.batteryPercent {
                 LabeledContent {
                     Text("\(battery)%")
@@ -260,31 +309,36 @@ struct BottleDetailView: View {
     @ViewBuilder
     private var driftNotices: some View {
         if let drift = model.zeroDriftML, drift > 0 {
-            Label("Reading \(app.volume(drift)) below empty — the zero has drifted.",
+            Label("Reading \(app.volume(drift)) below empty — the zero has sunk. Tap Empty when the bottle is.",
                   systemImage: "exclamationmark.triangle")
                 .font(.footnote)
                 .foregroundStyle(.orange)
         }
         if let over = model.overFullML, over > 20 {
-            // The same stale zero, crept upward. Nothing can be done about it from a
-            // bottle with water in it, so ask for the one thing that fixes it.
-            Label("Reading \(app.volume(over)) more than the bottle holds — empty it and set the zero.",
+            // The same stale zero, crept upward. A full bottle fixes it as well as an
+            // empty one does, so offer both.
+            Label("Reading \(app.volume(over)) more than the bottle holds — tap Full when it is, or Empty once it's empty.",
                   systemImage: "exclamationmark.triangle")
                 .font(.footnote)
                 .foregroundStyle(.orange)
         }
     }
 
-    /// Drift moves where empty reads without changing the scale, so re-capturing empty is
-    /// the whole fix. The app does it on its own once readings sit below empty for a
-    /// while; this is for doing it deliberately, with the bottle known to be empty.
-    private var rezeroButton: some View {
-        Button {
-            guard let shift = app.rezeroToCurrentReading() else { return }
-            rezeroMessage = "Zero moved by \(app.volume(abs(shift))). The bottle now reads empty."
-        } label: {
-            Label("Bottle is empty — set the zero", systemImage: "scalemass")
+    /// Drift moves where empty reads without changing the scale, so telling the app where
+    /// the bottle really is — empty, or full — is the whole fix, and the only way the
+    /// zero ever moves. Each asks first.
+    private var overrideRow: some View {
+        HStack(spacing: 10) {
+            Button { pendingOverride = .empty } label: {
+                Text("Empty").frame(maxWidth: .infinity)
+            }
+            Button { pendingOverride = .full } label: {
+                Text("Full").frame(maxWidth: .infinity)
+            }
         }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .padding(.vertical, 4)
         .disabled(model.stableRaw == nil)
     }
 

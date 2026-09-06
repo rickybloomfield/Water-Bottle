@@ -192,29 +192,34 @@ So the app stops treating a full calibration as the fix for drift:
 * **Re-zeroing keeps the scale and moves only the empty point** — `rezeroed(toEmptyRaw:)`.
   A drink measured before a re-zero measures the same after it, because only the origin
   moved, so the tracker carries on uninterrupted.
-* **A bottle's page has a one-tap "Bottle is empty — set the zero"**, which is the whole
-  correction. Measuring full again is unnecessary.
-* **It also happens on its own.** A bottle cannot hold less than nothing, so settled
-  readings that stay more than 25 mL below empty for three samples and 45 seconds mean the
-  zero has moved; the app moves it back and logs that it did. Before this, every one of
-  those readings was discarded as "bottle lifted" and nothing was logged at all — one real
-  session sat at −675 mL, tracking nothing, for over an hour.
-* **Unless it stepped there.** A bottle held in a hand also reads below empty, also holds
-  still, and does it for as long as you carry it. It is told apart by how it arrived:
-  drift creeps a millilitre or two per reading, while picking the bottle up is a cliff of
-  several hundred in one fifteen-second step, and no drink can match it — a bottle already
-  reading near empty has nothing like that left to give. See below for what happens when
-  this rule isn't there.
+* **Only a person moves the zero.** The bottle's page has two overrides, **Empty** and
+  **Full**, each behind an alert that says what it will do. Empty sets the zero at the
+  reading in hand. Full sets the level to the bottle's capacity and moves the zero so the
+  reading in hand means exactly that — given the scale, a full bottle says where empty
+  sits as surely as an empty one does. Neither is a calibration, and neither re-dates one:
+  the page said "Calibrated just now" after every move of the zero, which is how moving
+  it looked like calibrating.
+* **Empty offers to log what was left.** A bottle marked empty while the app still
+  believed water was in it usually means the drink that emptied it measured short — the
+  load cell reads high for the first minutes after a big unloading — so the alert offers
+  to log that remainder as a drink. It never does so unasked.
+* **Drift is internal.** Readings below empty are where a sunk zero puts an empty bottle,
+  and they are tracked like any others: the tracker measures differences, so a drink
+  taken from a bottle that reads under nothing still reads as a drink, and a relaunch
+  picks the tracker up wherever it was. Nothing moves the zero on its own. The app used
+  to, whenever readings sat below empty for a while, and that is how one evening's zero
+  ended up 788 mL below where the bottle rested by morning: the reading sinks for an hour
+  after an emptying and comes back up overnight, and a zero that only ever follows it
+  down reads a full bottle as three.
+* **A drink is at most what the bottle held.** The believed level caps every drink, live
+  or reconstructed across a disconnect. A drop past it is the zero sinking, or a hand
+  taking some of the weight off the sensor, and a bottle believed empty has nothing to
+  give. That is also what makes a below-empty reading after a gap safe to use — the delta
+  is kept and cut down to the contents, where before it was thrown away as implausible,
+  and 400 mL drunk while the bottle was asleep went unlogged.
 
-The trade: if the bottle drifts down far enough while it still holds water, the automatic
-re-zero will call that empty and the displayed level will be wrong until the next refill.
-Intake is unaffected — the tracker measures differences, and a drink after a re-zero still
-reads as a drink — and being wrong about the level beats discarding every reading.
-
-The zero also creeps *upward*, and there is no matching fix: a zero is captured from an
-empty bottle, and one with water in it has nothing to say about where empty sits. So when
-the scale reads more than the bottle can hold, the bottle's page says so and asks for the one
-thing that settles it — an empty bottle and the button above.
+The zero also creeps *upward*, so the scale can read more than the bottle holds. The
+bottle's page says so and points at the fix: Full, if it is, or Empty once it is.
 
 Calibrating itself is two numbered steps — empty, then full — each with one button, and it
 saves the moment both readings are in and make sense. The raw units, the span and the
@@ -229,8 +234,9 @@ picked up or set down. The tracker calls that *handled*: no drink, no refill, an
 baseline is held where it was so that setting the bottle back down is a change of nothing.
 
 That one rule is the whole of it for a full bottle, whose lift displaces more than a
-bottleful. A nearly empty one displaces less, but lands far below empty, where the older
-lifted-reading rule has it. What falls between the two is a drop of half a bottle or so
+bottleful. A nearly empty one displaces less and lands far below empty, and what keeps
+that from being a drink is that a nearly empty bottle has almost nothing to give: a drink
+is capped at what the bottle held. What falls between the two is a drop of half a bottle or so
 that still looks plausible — and those are held back and only logged once they have stayed
 down for a minute. A bottle that was only carried comes back long before that; water that
 was drunk never does. Ordinary sips are logged the moment they are seen, as before: it is
@@ -267,13 +273,21 @@ the app carries a level forward instead: it starts from a known point and moves 
 the tracker reports a drink or a refill. Differences are taken over seconds, where creep
 is nothing, so the displayed level holds still while the bottle does.
 
-It comes back into step at two moments. Emptying the bottle re-zeros it to nothing, and
-adding most of a bottleful in one go sets it to full — the water had nowhere else to go,
-so that is the one refill whose result is known from a difference alone. A smaller top-up
-only adds what went in.
+It comes back into step at three moments: **Empty** or **Full** on the bottle's page, and
+adding most of a bottleful in one go, which sets it to full — the water had nowhere else
+to go, so that is the one refill whose result is known from a difference alone. A smaller
+top-up only adds what went in.
 
 Between those, a missed event leaves it out of step, and the bottle's page shows what the
 scale says alongside it once the two differ by more than 20 mL.
+
+Deleting a drink the bottle logged puts its water back, since a deleted drink was usually
+never one — unless the level has been set outright since, by one of those moments or a
+recalibration, which already counted whatever was in the bottle; the model keeps the time
+of the last such reset for exactly this comparison. A drink recovered across a disconnect
+is no different: it comes off the carried level when there is one, and when there isn't,
+the reading that recovered it starts the level from the scale — a reset, so deleting the
+drink puts nothing back, and nothing was taken.
 
 ## When the level reads below empty
 
@@ -282,12 +296,12 @@ The bottle's scale drifts: over days its zero creeps down, so the raw reading ca
 deliberately unclamped inside `HidrateKit` — drink detection wants the real number, and
 a little negative is ordinary noise — but nothing shown to a person uses it any more.
 `clampedLevelML` is what the app displays, and when the reading is genuinely under empty
-the bottle's page says by how much and suggests recapturing the empty point.
+the bottle's page says by how much and points at Empty.
 
 The level the app shows before the bottle reconnects is stored as the last settled *raw*
 reading rather than as millilitres. Recalibrating then reinterprets it instead of
-invalidating it, and a bottle whose zero has drifted — every sample below the "lifted"
-threshold, so nothing counted as settled — still leaves something to draw. Both of those
+invalidating it, and a bottle whose zero has drifted — which, before every reading was
+tracked, meant nothing counted as settled — still leaves something to draw. Both of those
 used to end the same way: an empty bottle on the Today tab until the bottle reconnected.
 
 ## The bottle's light

@@ -12,6 +12,9 @@ struct IntakeEntry: Identifiable, Codable, Hashable {
         case manual
         case widget
         case watch
+        /// What the app believed was left in the bottle when it was marked empty, logged
+        /// at the person's say-so.
+        case emptied
 
         var title: String {
             switch self {
@@ -20,11 +23,12 @@ struct IntakeEntry: Identifiable, Codable, Hashable {
             case .manual: "Manual"
             case .widget: "Widget"
             case .watch: "Apple Watch"
+            case .emptied: "Marked empty"
             }
         }
 
         /// True for anything the user tapped rather than the bottle measuring.
-        var isHandLogged: Bool { self == .manual || self == .widget || self == .watch }
+        var isHandLogged: Bool { self == .manual || self == .widget || self == .watch || self == .emptied }
 
         var symbolName: String {
             switch self {
@@ -32,6 +36,7 @@ struct IntakeEntry: Identifiable, Codable, Hashable {
             case .manual: "hand.tap.fill"
             case .widget: "square.grid.2x2.fill"
             case .watch: "applewatch"
+            case .emptied: "waterbottle"
             }
         }
 
@@ -42,6 +47,7 @@ struct IntakeEntry: Identifiable, Codable, Hashable {
             case .manual: "Logged by hand"
             case .widget: "Widget"
             case .watch: "Apple Watch"
+            case .emptied: "Left in the bottle"
             }
         }
     }
@@ -219,7 +225,6 @@ final class AppState {
     /// The most recent time the zero moved, so the Bottle tab can say it happened.
     struct ZeroMove: Equatable {
         var shiftML: Double
-        var automatic: Bool
         var date: Date
     }
     private(set) var lastZeroMove: ZeroMove?
@@ -325,10 +330,10 @@ final class AppState {
         model.onSettledReading = { [weak self] reading in
             if let line = reading.logLine { self?.sessionLog.write(line) }
         }
-        model.onZeroMoved = { [weak self] shiftML, automatic in
+        model.onZeroMoved = { [weak self] shiftML in
             guard let self else { return }
-            sessionLog.write(String(format: "zero moved %@ by %.0f mL", automatic ? "automatically" : "by hand", shiftML))
-            lastZeroMove = ZeroMove(shiftML: shiftML, automatic: automatic, date: Date())
+            sessionLog.write(String(format: "zero moved by %.0f mL", shiftML))
+            lastZeroMove = ZeroMove(shiftML: shiftML, date: Date())
             publishSnapshot()
         }
         model.onSip = { [weak self] record in self?.handle(record) }
@@ -846,12 +851,16 @@ final class AppState {
     ///
     /// If Health refuses, the drink comes back where it was, because the sample is still
     /// there and the two have to agree.
+    ///
+    /// A drink the bottle measured came off the level the app carries for it, and a
+    /// deleted one usually wasn't a drink at all, so its water goes back — once Health has
+    /// agreed, so there is nothing to undo if it doesn't. A hand-logged drink never
+    /// touched the bottle, so the model hears only about the bottle's own.
     func delete(_ entry: IntakeEntry) async {
         guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
         let removed = entries[index]
         sessionLog.write("delete \(Int(removed.volumeML))mL at \(Format.time.string(from: removed.date))")
         entries.remove(at: index)
-        model.removeLevelChange(id: entry.id)
         if let uuid = removed.healthKitUUID {
             do {
                 try await health.deleteWater(uuid: uuid)
@@ -859,6 +868,12 @@ final class AppState {
                 entries.insert(removed, at: min(index, entries.count))
                 lastError = "HealthKit delete failed: \(error.localizedDescription)"
                 return
+            }
+        }
+        if removed.source == .weight {
+            model.removeLevelChange(id: removed.id, volumeML: removed.volumeML, date: removed.date)
+            if let level = model.believedLevelML {
+                sessionLog.write("level after delete \(Int(level))mL")
             }
         }
         await refreshHealthTotal()
@@ -940,16 +955,44 @@ final class AppState {
         if model.isConnected { model.client.setLED(.greenGlow) }
     }
 
-    /// Take the reading in hand as a new empty point, keeping the scale. What drift
-    /// actually needs — and far less work than measuring empty and full again.
+    /// What the app believes is still in the bottle, when that is enough to have been a
+    /// drink. A bottle marked empty while the app thought otherwise usually means the
+    /// drink that emptied it measured short, so Empty offers to log this.
+    var remainingInBottleML: Double? {
+        guard let level = model.believedLevelML, level >= model.trackerConfiguration.minDrinkML else { return nil }
+        return level.rounded()
+    }
+
+    /// The bottle is empty: set the zero at the reading in hand, keeping the scale, and
+    /// first log what the app thought was left if asked to. Returns how far the zero
+    /// moved, or nil without a steady reading.
     @discardableResult
-    func rezeroToCurrentReading() -> Double? {
-        guard let shift = model.rezeroToCurrentReading() else {
-            lastError = "No steady reading yet. Set the bottle on a flat surface and wait a few seconds."
+    func markEmpty(loggingRemainder: Bool) -> Double? {
+        guard model.stableRaw != nil else {
+            lastError = Self.noSteadyReading
+            return nil
+        }
+        // Logged before the zero moves, so it is dated before the level was set outright
+        // and deleting it later puts nothing back into a bottle declared empty.
+        if loggingRemainder, let remaining = remainingInBottleML {
+            sessionLog.write("marked empty with \(Int(remaining))mL believed left; logging it")
+            add(IntakeEntry(id: UUID(), date: Date(), volumeML: remaining, source: .emptied))
+        }
+        return model.markEmpty()
+    }
+
+    /// The bottle is full: the level becomes its capacity and the zero moves to match the
+    /// reading in hand. Returns how far the zero moved, or nil without a steady reading.
+    @discardableResult
+    func markFull() -> Double? {
+        guard let shift = model.markFull() else {
+            lastError = Self.noSteadyReading
             return nil
         }
         return shift
     }
+
+    private static let noSteadyReading = "No steady reading yet. Set the bottle on a flat surface and wait a few seconds."
 
     func clearCalibration() {
         model.calibration = nil

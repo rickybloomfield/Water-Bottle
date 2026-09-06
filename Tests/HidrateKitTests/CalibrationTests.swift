@@ -87,7 +87,7 @@ struct DriftModelTests {
 struct LevelTrackerTests {
     let t0 = Date(timeIntervalSince1970: 1_000_000)
     func tracker() -> LevelTracker {
-        LevelTracker(configuration: .init(minDrinkML: 15, refillFractionOfCapacity: 0.5, nearFullFraction: 0.9, liftedBelowML: -60), capacityML: 621)
+        LevelTracker(configuration: .init(minDrinkML: 15, refillFractionOfCapacity: 0.5, nearFullFraction: 0.9), capacityML: 621)
     }
 
     @Test func firstReadingIsBaseline() {
@@ -145,6 +145,28 @@ struct LevelTrackerTests {
         // +150 mL, ends at 450 (~72%): neither a big jump nor near full → ignored.
         #expect(t.ingest(levelML: 450, at: t0 + 10) == nil)
         #expect(t.baselineML == 300)
+    }
+
+    /// The afternoon the bottle went dark with 402 mL in it and came back reading 207 mL
+    /// under empty: the zero had sunk, and the water was gone. A creep rate applied to
+    /// the whole two and a half hours would have corrected the drink out of existence.
+    @Test func creepDiscountIsCappedAcrossALongGap() {
+        var t = tracker()
+        t.creepMLPerSecond = 0.05
+        _ = t.ingest(levelML: 402, at: t0)
+        let gap: TimeInterval = 2.5 * 3600
+        // More than half the bottle in one step is held until it stays down.
+        #expect(t.ingest(levelML: -207, at: t0 + gap) == nil)
+        guard case .drink(let volume, let from, let to)? = t.ingest(levelML: -210, at: t0 + gap + 61) else {
+            Issue.record("expected the drop to be confirmed as a drink")
+            return
+        }
+        // Held from the level less ten minutes' creep, the most the rate is extrapolated.
+        #expect(from == 372)
+        #expect(to == -210)
+        // 609 observed, less 30 mL of creep and the minute of it while it waited.
+        #expect(volume > 570 && volume < 580, "got \(volume)")
+        #expect(t.baselineML == -210, "tracking carries on from under empty")
     }
 
     @Test func liftedReadingIsIgnored() {
@@ -249,6 +271,17 @@ struct RezeroTests {
         #expect(abs(rezeroed.milliliters(forRaw: drifted + calibration.rawSpan) - 621) < 0.001)
     }
 
+    /// Moving the zero is not calibrating, and mustn't read as if it were: the bottle's
+    /// page said "Calibrated just now" after every move.
+    @Test func movingTheZeroKeepsTheCalibrationDate() {
+        let calibratedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let original = BottleCalibration(emptyRaw: 23089, fullRaw: 23946, capacityML: 621, calibratedAt: calibratedAt)
+        let moved = original.rezeroed(toEmptyRaw: 22569, at: calibratedAt.addingTimeInterval(86_400))
+        #expect(moved.calibratedAt == calibratedAt)
+        #expect(moved.zeroedAt == calibratedAt.addingTimeInterval(86_400))
+        #expect(original.zeroedAt == nil)
+    }
+
     /// A drink measured before the re-zero must measure the same after it: only the
     /// origin moved, so differences are untouched.
     @Test func differencesSurviveTheMove() {
@@ -349,6 +382,77 @@ struct BelievedLevelTests {
         }
         #expect(abs(believed - 421) < 1)
     }
+
+    // MARK: - A drink is at most what the bottle held
+
+    @Test func aDrinkIsCutDownToTheContents() {
+        let measured = LevelChange.drink(volumeML: 569, fromML: 402, toML: -207)
+        #expect(HidrateBottleModel.drink(measured, cappedAt: 402, minDrinkML: 15) == .drink(volumeML: 402, fromML: 402, toML: -207))
+        #expect(HidrateBottleModel.drink(measured, cappedAt: 700, minDrinkML: 15) == measured)
+        #expect(HidrateBottleModel.drink(measured, cappedAt: nil, minDrinkML: 15) == measured)
+    }
+
+    /// The bottle the app believed empty, lifted with some weight left on the sensor for
+    /// a minute: 507 mL "drunk" from nothing is nothing.
+    @Test func anEmptyBottleHasNothingToGive() {
+        let measured = LevelChange.drink(volumeML: 507, fromML: -27, toML: -534)
+        #expect(HidrateBottleModel.drink(measured, cappedAt: 0, minDrinkML: 15) == nil)
+        #expect(HidrateBottleModel.drink(measured, cappedAt: 9, minDrinkML: 15) == nil)
+    }
+
+    // MARK: - Putting a deleted drink back
+
+    private func makeStore() -> (CalibrationStore, UserDefaults, String) {
+        let name = "HidrateKitTests." + UUID().uuidString
+        let defaults = UserDefaults(suiteName: name)!
+        return (CalibrationStore(defaults: defaults), defaults, name)
+    }
+
+    private let noon = Date(timeIntervalSince1970: 1_700_000_000)
+
+    /// The bug: deleting a drink the bottle had logged left the carried level down by it.
+    @Test func aDeletedDrinkGoesBackIntoTheBottle() {
+        let level = HidrateBottleModel.believedLevel(200, capacityML: capacity, restoring: 250, drunkAt: noon, setAt: nil)
+        #expect(level == 450)
+    }
+
+    @Test func putBackStopsAtAFullBottle() {
+        let level = HidrateBottleModel.believedLevel(500, capacityML: capacity, restoring: 250, drunkAt: noon, setAt: nil)
+        #expect(level == capacity)
+    }
+
+    /// A refill to the top or an emptying after the drink already counted whatever was in
+    /// the bottle, so putting the drink back would double it.
+    @Test func aDrinkFromBeforeTheLevelWasResetPutsNothingBack() {
+        let reset = noon.addingTimeInterval(3_600)
+        let level = HidrateBottleModel.believedLevel(capacity, capacityML: capacity, restoring: 250, drunkAt: noon, setAt: reset)
+        #expect(level == nil)
+    }
+
+    @Test func aDrinkSinceTheLastResetStillGoesBack() {
+        let reset = noon.addingTimeInterval(-3_600)
+        let level = HidrateBottleModel.believedLevel(300, capacityML: capacity, restoring: 250, drunkAt: noon, setAt: reset)
+        #expect(level == 550)
+    }
+
+    @Test func nothingCarriedMeansNothingToPutBack() {
+        #expect(HidrateBottleModel.believedLevel(nil, capacityML: capacity, restoring: 250, drunkAt: noon, setAt: nil) == nil)
+        #expect(HidrateBottleModel.believedLevel(200, capacityML: capacity, restoring: 0, drunkAt: noon, setAt: nil) == nil)
+    }
+
+    @Test func theResetTimeRoundTripsWithTheLevel() {
+        let (store, defaults, name) = makeStore()
+        defer { defaults.removePersistentDomain(forName: name) }
+
+        #expect(store.loadBelievedLevelSetAt() == nil)
+        store.saveBelievedLevelML(300)
+        store.saveBelievedLevelSetAt(noon)
+        #expect(store.loadBelievedLevelSetAt() == noon)
+        store.erase()
+        #expect(store.loadBelievedLevelML() == nil)
+        #expect(store.loadBelievedLevelSetAt() == nil)
+    }
+
 }
 
 /// Picking a full bottle up by the lid used to read as a 24.9 oz drink, logged to Health,
@@ -428,11 +532,16 @@ struct HandlingTests {
 
     /// A drop measured across a disconnect is not a step between two readings, and drift
     /// over a quarter of an hour away can be larger than the bottle. Only readings that
-    /// follow on from one another can say the bottle was handled.
+    /// follow on from one another can say the bottle was handled: this one is a drink
+    /// candidate, held until it stays — and the model cuts it to what the bottle held.
     @Test func aGapIsNotAStep() {
         var t = tracker()
         _ = t.ingest(levelML: 700, at: t0)
-        #expect(t.ingest(levelML: -100, at: t0 + 3600)?.isHandled != true)
+        #expect(t.ingest(levelML: -100, at: t0 + 3600) == nil, "held")
+        let confirmed = t.ingest(levelML: -102, at: t0 + 3661)
+        #expect(confirmed?.isDrink == true, "got \(String(describing: confirmed))")
+        #expect(confirmed?.volumeML ?? 0 > 780, "more than the bottle: the model caps it")
+        #expect(t.baselineML == -102)
     }
 
     /// Filling a dry bottle to the brim is the largest change water can make, and has to
@@ -484,75 +593,6 @@ struct UpwardDriftTests {
     }
 }
 
-/// When moving the zero on its own is right, and when it is the worst thing the app can
-/// do. Both runs below are from the session log of 4 September 2026.
-@Suite("Deciding to move the zero")
-struct ZeroDriftWatcherTests {
-    let t0 = Date(timeIntervalSince1970: 1_000_000)
-
-    /// 10:32. The reading had crept down for an hour and sat at −675 mL; nothing was being
-    /// tracked at all until the zero moved.
-    @Test func aDriftedZeroIsMovedBack() {
-        var watcher = ZeroDriftWatcher()
-        var previous: (levelML: Double, date: Date)?
-        var moved = false
-        for (index, level) in [-672.0, -673, -675, -676, -675].enumerated() {
-            let date = t0 + Double(index) * 15
-            moved = watcher.shouldRezero(levelML: level, at: date, after: previous)
-            previous = (levelML: level, date: date)
-            if moved { break }
-        }
-        #expect(moved)
-    }
-
-    /// 13:28, and the origin of the whole problem: the bottle was picked up, read −374 mL
-    /// for two and a half minutes, and the zero was moved onto it. Every reading after
-    /// that was wrong by the weight of the bottle.
-    @Test func aBottleInTheAirNeverMovesTheZero() {
-        var watcher = ZeroDriftWatcher()
-        var previous: (levelML: Double, date: Date)? = (levelML: 743, date: t0)
-        for (index, level) in [-374.0, -373, -372, -373, -374, -372, -372, -371, -371, -373, -369, -371].enumerated() {
-            let date = t0 + 15 + Double(index) * 4
-            let moved = watcher.shouldRezero(levelML: level, at: date, after: previous)
-            #expect(!moved, "moved the zero onto a bottle that was in the air")
-            previous = (levelML: level, date: date)
-        }
-    }
-
-    /// Once the bottle is back on the table the run is over, and a later genuine drift is
-    /// judged on its own.
-    @Test func theRefusalDoesNotOutlastTheLift() {
-        var watcher = ZeroDriftWatcher()
-        _ = watcher.shouldRezero(levelML: -400, at: t0 + 15, after: (levelML: 700, date: t0))
-        _ = watcher.shouldRezero(levelML: 700, at: t0 + 30, after: (levelML: -400, date: t0 + 15))
-        var previous = (levelML: -30.0, date: t0 + 45)
-        var moved = false
-        for index in 1...4 {
-            let level = -30.0 - Double(index)
-            let date = t0 + 45 + Double(index) * 15
-            moved = watcher.shouldRezero(levelML: level, at: date, after: previous)
-            previous = (levelML: level, date: date)
-            if moved { break }
-        }
-        #expect(moved)
-    }
-
-    /// A run that has to be believed even though the step into it was huge: across a
-    /// disconnect there is no step, only a gap.
-    @Test func aGapIsNotAStepEither() {
-        var watcher = ZeroDriftWatcher()
-        var previous: (levelML: Double, date: Date)? = (levelML: 116, date: t0)
-        var moved = false
-        for index in 1...5 {
-            let date = t0 + 3600 + Double(index) * 15
-            moved = watcher.shouldRezero(levelML: -672, at: date, after: previous)
-            previous = (levelML: -672, date: date)
-            if moved { break }
-        }
-        #expect(moved)
-    }
-}
-
 /// Washing the bottle, from the session log of 5 September 2026: the sensor came off, the
 /// bottle was emptied, and the two went back together. Five drinks were logged — 97, 1008,
 /// 23, 211 and 18 mL — from a 621 mL bottle nobody drank from. Levels are as the
@@ -566,10 +606,11 @@ struct WashingTests {
     func tracker() -> LevelTracker { LevelTracker(capacityML: 621) }
 
     /// 16:34:58: resting at 1521 mL before the wash, the emptied bottle read 822 and sat
-    /// there, creeping, for the best part of a minute. Then a gap, and 513 at 16:42:50 —
-    /// which confirmed the drop as a 1008 mL drink. No drop past what the bottle holds is
-    /// water: the bottle was emptied, and after a minute the baseline goes to where it is.
-    @Test func anEmptiedBottleBecomesTheNewBaselineNotADrink() {
+    /// there, creeping, for the best part of a minute. Then a gap, and 513 at 16:42:50.
+    /// The drop is held until it stays, then reported as measured — 1008 mL, more than
+    /// the bottle holds — for the model to cut down to what the bottle held: nothing, for
+    /// a bottle believed empty. Either way the baseline goes to where the bottle now sits.
+    @Test func anEmptiedBottleBecomesTheNewBaseline() {
         var t = tracker()
         t.reset(baselineML: 1521)
         var changes: [LevelChange?] = []
@@ -580,8 +621,11 @@ struct WashingTests {
         #expect(changes.allSatisfy { $0?.isDrink != true }, "nothing here was drunk")
         #expect(t.baselineML == 1521, "held: the bottle could still be set back down")
         let later = t.ingest(levelML: 513, at: t0 + 472)
-        #expect(later?.isDrink == false, "a 1008 mL drink out of a 621 mL bottle: \(String(describing: later))")
-        #expect(later?.isHandled == true)
+        #expect(later == .drink(volumeML: 1008, fromML: 1521, toML: 513), "reported as measured: \(String(describing: later))")
+        #expect(HidrateBottleModel.drink(later!, cappedAt: 0, minDrinkML: 15) == nil,
+                "and the model, believing the bottle empty, logs nothing")
+        #expect(HidrateBottleModel.drink(later!, cappedAt: nil, minDrinkML: 15) == later,
+                "with nothing to cap by the measurement stands; the model caps by capacity itself")
         #expect(t.baselineML == 513, "it stayed: the empty bottle is the new baseline")
     }
 

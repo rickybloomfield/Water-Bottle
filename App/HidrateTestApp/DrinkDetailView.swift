@@ -157,7 +157,9 @@ struct DrinkDetailView: View {
                     Button("Save to Health") { Task { await app.logToHealth(entry) } }
                 }
             } footer: {
-                if entry.approximate {
+                if entry.source == .emptied {
+                    Text("What the app believed was still in the bottle when you marked it empty.")
+                } else if entry.approximate {
                     Text("Reconstructed after the bottle reconnected, so the amount is approximate and the time is the middle of the gap.")
                 } else if entry.healthKitUUID != nil, isEditable {
                     Text("Health can't change a sample once written, so saving removes the old one and writes a new one.")
