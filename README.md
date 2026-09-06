@@ -340,6 +340,16 @@ surface stays perpendicular to gravity and preserves volume at any angle, so tur
 phone pools the water against the side or the cap, tapping ripples it, and it drains
 smoothly as you drink. It's a stylised model tuned to feel like water, not a fluid solver.
 
+## The opening
+
+The app opens on the drop from its icon, empty, drawn by the launch storyboard while the
+process starts; `LaunchSplash` then takes over on the same background with the same drop in
+the same place, so nothing jumps. Water wells up inside it, the name arrives, and once the
+Today tab underneath has appeared the drop opens like an iris onto the app. The splash keeps
+time by the frames it actually draws, each step capped at a thirtieth of a second, so the
+main thread's startup work holds the water still rather than making it leap when frames
+resume. Reduce Motion gets a flat fill and a plain fade instead of the zoom.
+
 ## Quick start (iOS app)
 
 ```bash

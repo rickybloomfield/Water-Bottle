@@ -50,7 +50,7 @@ targets:
         CFBundleDisplayName: Hydration
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        UILaunchScreen: {}
+        UILaunchStoryboardName: LaunchScreen
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSBluetoothAlwaysUsageDescription: Connects to your HidrateSpark bottle to read its water level and sips.
         NSHealthShareUsageDescription: Reads today's water intake so the app can show your total.
@@ -65,7 +65,7 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_STRICT_CONCURRENCY: complete
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "52"
+        CURRENT_PROJECT_VERSION: "53"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
 
   HidrateWidgets:
@@ -93,7 +93,7 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_STRICT_CONCURRENCY: complete
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "52"
+        CURRENT_PROJECT_VERSION: "53"
 
   HidrateWatchApp:
     type: application
@@ -126,7 +126,7 @@ targets:
         TARGETED_DEVICE_FAMILY: "4"
         SWIFT_STRICT_CONCURRENCY: complete
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "52"
+        CURRENT_PROJECT_VERSION: "53"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
 
   HidrateWatchWidgets:
@@ -154,4 +154,4 @@ targets:
         TARGETED_DEVICE_FAMILY: "4"
         SWIFT_STRICT_CONCURRENCY: complete
         MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "52"
+        CURRENT_PROJECT_VERSION: "53"
