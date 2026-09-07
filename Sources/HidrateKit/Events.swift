@@ -148,8 +148,6 @@ public struct SettledReading: Sendable, Hashable {
     /// compare with — which is how a drink goes missing without a trace.
     public var baselineBeforeML: Double?
     public var change: LevelChange?
-    /// A drink reconstructed from the level saved before the last disconnect.
-    public var recovered: Bool
     /// False when the reading sits below empty — where a sunk zero puts an empty bottle.
     /// Tracked all the same; noted so the log can explain a level under nothing.
     public var plausible: Bool
@@ -161,14 +159,13 @@ public struct SettledReading: Sendable, Hashable {
     public var cappedFromML: Double?
 
     public init(date: Date, raw: Int, levelML: Double, baselineBeforeML: Double?,
-                change: LevelChange?, recovered: Bool, plausible: Bool, isFirstOfSession: Bool,
+                change: LevelChange?, plausible: Bool, isFirstOfSession: Bool,
                 cappedFromML: Double? = nil) {
         self.date = date
         self.raw = raw
         self.levelML = levelML
         self.baselineBeforeML = baselineBeforeML
         self.change = change
-        self.recovered = recovered
         self.plausible = plausible
         self.isFirstOfSession = isFirstOfSession
         self.cappedFromML = cappedFromML
@@ -177,12 +174,11 @@ public struct SettledReading: Sendable, Hashable {
     /// One line for the session log. Only worth writing when something notable happened
     /// or could have: the rest are two-second heartbeats.
     public var logLine: String? {
-        guard isFirstOfSession || baselineBeforeML == nil || !plausible || recovered
+        guard isFirstOfSession || baselineBeforeML == nil || !plausible
                 || change?.isHandled == true || cappedFromML != nil else { return nil }
         let baseline = baselineBeforeML.map { String(Int($0.rounded())) } ?? "none"
         let outcome = change.map { String(describing: $0) } ?? "no change"
         var line = "settled raw=\(raw) level=\(Int(levelML.rounded()))mL baseline=\(baseline) → \(outcome)"
-        if recovered { line += " [recovered a drink across the gap]" }
         if !plausible { line += " [below empty]" }
         if let cappedFromML { line += " [measured \(Int(cappedFromML.rounded()))mL; only what the bottle held]" }
         if isFirstOfSession { line += " [first of session]" }

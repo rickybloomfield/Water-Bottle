@@ -59,30 +59,6 @@ struct StableWeightFilterTests {
     }
 }
 
-@Suite("Drift model")
-struct DriftModelTests {
-    @Test func correctsForDriftButNeverGoesNegative() {
-        let drift = DriftModel(mlPerMinute: 15, maxCorrectionML: .infinity, maxGapSeconds: 3600)
-        // Over 4 minutes, 60 mL of the observed drop is drift.
-        #expect(abs(drift.correctedDrop(observedDrop: 200, gapSeconds: 240) - 140) < 0.01)
-        // Pure drift, no real drink: corrected drop is ~0, not negative.
-        #expect(drift.correctedDrop(observedDrop: 60, gapSeconds: 240) <= 0.01)
-        #expect(drift.correctedDrop(observedDrop: 10, gapSeconds: 600) <= 0.01)
-    }
-
-    /// The bottle disconnects every quarter of an hour, so the correction over a gap that
-    /// long has to leave a real drink standing.
-    @Test func aRealDrinkSurvivesTheUsualDisconnect() {
-        let drift = DriftModel()
-        // 12 oz taken while the bottle was away for fifteen minutes.
-        #expect(drift.correctedDrop(observedDrop: 355, gapSeconds: 900) > 300)
-        // And the correction stops growing rather than swallowing the drink whole.
-        #expect(drift.correctedDrop(observedDrop: 355, gapSeconds: 3600) > 300)
-        // Still nothing left of a drop that is only drift.
-        #expect(drift.correctedDrop(observedDrop: 20, gapSeconds: 900) <= 0.01)
-    }
-}
-
 @Suite("Level tracker")
 struct LevelTrackerTests {
     let t0 = Date(timeIntervalSince1970: 1_000_000)
@@ -147,26 +123,47 @@ struct LevelTrackerTests {
         #expect(t.baselineML == 300)
     }
 
-    /// The afternoon the bottle went dark with 402 mL in it and came back reading 207 mL
-    /// under empty: the zero had sunk, and the water was gone. A creep rate applied to
-    /// the whole two and a half hours would have corrected the drink out of existence.
-    @Test func creepDiscountIsCappedAcrossALongGap() {
+    /// The night the bottle sat untouched with 330 mL in it and the reading slid down
+    /// 186 mL by morning: within a connection the slide arrives a millilitre at a time
+    /// and is absorbed, but the bottle sleeps for an hour at a stretch, and each time it
+    /// woke the slide had become one step of 20 to 75 mL — four "drinks" from a bottle
+    /// nobody touched. Nothing across a gap is measured; the baseline follows.
+    @Test func aDropAcrossAGapIsNotADrink() {
         var t = tracker()
-        t.creepMLPerSecond = 0.05
+        _ = t.ingest(levelML: 328, at: t0)
+        #expect(t.ingest(levelML: 254, at: t0 + 63 * 60) == nil)
+        #expect(t.baselineML == 254, "the baseline follows to where the bottle now reads")
+        // The next drop watched happen is measured from there.
+        #expect(t.ingest(levelML: 224, at: t0 + 63 * 60 + 15) == .drink(volumeML: 30, fromML: 254, toML: 224))
+    }
+
+    /// A new connection is a gap however recent the last reading was: the first reading
+    /// of a session is where the bottle sits, not a step from the one before.
+    @Test func aNewSessionStartsFromWhereTheBottleSits() {
+        var t = tracker()
         _ = t.ingest(levelML: 402, at: t0)
-        let gap: TimeInterval = 2.5 * 3600
-        // More than half the bottle in one step is held until it stays down.
-        #expect(t.ingest(levelML: -207, at: t0 + gap) == nil)
-        guard case .drink(let volume, let from, let to)? = t.ingest(levelML: -210, at: t0 + gap + 61) else {
-            Issue.record("expected the drop to be confirmed as a drink")
-            return
-        }
-        // Held from the level less ten minutes' creep, the most the rate is extrapolated.
-        #expect(from == 372)
-        #expect(to == -210)
-        // 609 observed, less 30 mL of creep and the minute of it while it waited.
-        #expect(volume > 570 && volume < 580, "got \(volume)")
-        #expect(t.baselineML == -210, "tracking carries on from under empty")
+        t.sessionStarted()
+        #expect(t.ingest(levelML: -207, at: t0 + 30) == nil)
+        #expect(t.baselineML == -207)
+    }
+
+    /// The zero wanders up as readily as down while the bottle sleeps. Adopting only
+    /// the downward kind would leave the baseline low and the next real drink unmeasured.
+    @Test func aRiseAcrossAGapIsAdoptedToo() {
+        var t = tracker()
+        _ = t.ingest(levelML: 200, at: t0)
+        #expect(t.ingest(levelML: 260, at: t0 + 3600) == nil)
+        #expect(t.baselineML == 260)
+        #expect(t.ingest(levelML: 230, at: t0 + 3600 + 15) == .drink(volumeML: 30, fromML: 260, toML: 230))
+    }
+
+    /// A refill is the one thing worth reporting across a gap: filling from near empty
+    /// to the brim is unmistakable however long the bottle was away.
+    @Test func aRefillAcrossAGapIsStillARefill() {
+        var t = tracker()
+        _ = t.ingest(levelML: 40, at: t0)
+        #expect(t.ingest(levelML: 615, at: t0 + 3600) == .refill(volumeML: 575, fromML: 40, toML: 615))
+        #expect(t.baselineML == 615)
     }
 
     @Test func liftedReadingIsIgnored() {
@@ -532,16 +529,13 @@ struct HandlingTests {
 
     /// A drop measured across a disconnect is not a step between two readings, and drift
     /// over a quarter of an hour away can be larger than the bottle. Only readings that
-    /// follow on from one another can say the bottle was handled: this one is a drink
-    /// candidate, held until it stays — and the model cuts it to what the bottle held.
+    /// follow on from one another can say the bottle was handled — or drunk from. This
+    /// is neither: the bottle now reads -100, and that is all.
     @Test func aGapIsNotAStep() {
         var t = tracker()
         _ = t.ingest(levelML: 700, at: t0)
-        #expect(t.ingest(levelML: -100, at: t0 + 3600) == nil, "held")
-        let confirmed = t.ingest(levelML: -102, at: t0 + 3661)
-        #expect(confirmed?.isDrink == true, "got \(String(describing: confirmed))")
-        #expect(confirmed?.volumeML ?? 0 > 780, "more than the bottle: the model caps it")
-        #expect(t.baselineML == -102)
+        #expect(t.ingest(levelML: -100, at: t0 + 3600) == nil)
+        #expect(t.baselineML == -100)
     }
 
     /// Filling a dry bottle to the brim is the largest change water can make, and has to
@@ -607,26 +601,21 @@ struct WashingTests {
 
     /// 16:34:58: resting at 1521 mL before the wash, the emptied bottle read 822 and sat
     /// there, creeping, for the best part of a minute. Then a gap, and 513 at 16:42:50.
-    /// The drop is held until it stays, then reported as measured — 1008 mL, more than
-    /// the bottle holds — for the model to cut down to what the bottle held: nothing, for
-    /// a bottle believed empty. Either way the baseline goes to where the bottle now sits.
+    /// Neither reading followed on from the one before it, so nothing between them is
+    /// measured: the baseline goes to where the bottle now sits, and nothing is logged.
     @Test func anEmptiedBottleBecomesTheNewBaseline() {
         var t = tracker()
         t.reset(baselineML: 1521)
         var changes: [LevelChange?] = []
         changes.append(t.ingest(levelML: 822, at: t0))
+        #expect(t.baselineML == 822, "a first reading with no last one to follow on from")
         for step in 1...20 {
             changes.append(t.ingest(levelML: 814 - Double(step) * 1.4, at: t0 + 9 + Double(step) * 2))
         }
-        #expect(changes.allSatisfy { $0?.isDrink != true }, "nothing here was drunk")
-        #expect(t.baselineML == 1521, "held: the bottle could still be set back down")
+        #expect(changes.allSatisfy { $0 == nil }, "nothing here was drunk: \(changes.compactMap { $0 })")
         let later = t.ingest(levelML: 513, at: t0 + 472)
-        #expect(later == .drink(volumeML: 1008, fromML: 1521, toML: 513), "reported as measured: \(String(describing: later))")
-        #expect(HidrateBottleModel.drink(later!, cappedAt: 0, minDrinkML: 15) == nil,
-                "and the model, believing the bottle empty, logs nothing")
-        #expect(HidrateBottleModel.drink(later!, cappedAt: nil, minDrinkML: 15) == later,
-                "with nothing to cap by the measurement stands; the model caps by capacity itself")
-        #expect(t.baselineML == 513, "it stayed: the empty bottle is the new baseline")
+        #expect(later == nil, "seven minutes on: \(String(describing: later))")
+        #expect(t.baselineML == 513, "the empty bottle is the new baseline")
     }
 
     /// The same thing seen the other way: a drop held as a possible drink that then goes

@@ -211,12 +211,20 @@ So the app stops treating a full calibration as the fix for drift:
   ended up 788 mL below where the bottle rested by morning: the reading sinks for an hour
   after an emptying and comes back up overnight, and a zero that only ever follows it
   down reads a full bottle as three.
-* **A drink is at most what the bottle held.** The believed level caps every drink, live
-  or reconstructed across a disconnect. A drop past it is the zero sinking, or a hand
-  taking some of the weight off the sensor, and a bottle believed empty has nothing to
-  give. That is also what makes a below-empty reading after a gap safe to use — the delta
-  is kept and cut down to the contents, where before it was thrown away as implausible,
-  and 400 mL drunk while the bottle was asleep went unlogged.
+* **A drink is at most what the bottle held.** The believed level caps every drink. A
+  drop past it is the zero sinking, or a hand taking some of the weight off the sensor,
+  and a bottle believed empty has nothing to give.
+* **A drink is a drop the app watched happen.** Only readings that follow on from one
+  another, seconds apart in one connection, can measure one. Across a gap — the bottle
+  asleep, the app relaunched, a reconnect — nothing is measured: the reading the bottle
+  comes back at becomes the baseline, up or down, and only a refill is reported. The
+  bottle sleeps for an hour at a stretch overnight, and a slow slide that is absorbed a
+  millilitre at a time while connected arrives as one 20–75 mL step when it wakes; a
+  bottle nobody touched logged four drinks that way in one night. The price is that a
+  drink taken while the bottle is away isn't measured either. The level the app carries
+  still holds that water, so it is what Empty offers to log when the bottle is next
+  emptied — and a missed drink is visible and can be added, where an invented one has
+  already been written to Apple Health.
 
 The zero also creeps *upward*, so the scale can read more than the bottle holds. The
 bottle's page says so and points at the fix: Full, if it is, or Empty once it is.
@@ -284,10 +292,7 @@ scale says alongside it once the two differ by more than 20 mL.
 Deleting a drink the bottle logged puts its water back, since a deleted drink was usually
 never one — unless the level has been set outright since, by one of those moments or a
 recalibration, which already counted whatever was in the bottle; the model keeps the time
-of the last such reset for exactly this comparison. A drink recovered across a disconnect
-is no different: it comes off the carried level when there is one, and when there isn't,
-the reading that recovered it starts the level from the scale — a reset, so deleting the
-drink puts nothing back, and nothing was taken.
+of the last such reset for exactly this comparison.
 
 ## When the level reads below empty
 
@@ -326,16 +331,17 @@ patterns**, along with the raw byte for the drink light.
 
 Every settled reading now gets a line in the session log when there is anything to say
 about it — the first of a session, one taken with no baseline to compare against, one
-below empty, or one that recovered a drink across a disconnect. A drink that is silently
-dropped otherwise leaves no trace at all, which made the first real report of one take a
-log dump and a lot of arithmetic to explain.
+below empty, one that was handled, or a drink cut down to what the bottle held. A drink
+that is silently dropped otherwise leaves no trace at all, which made the first real
+report of one take a log dump and a lot of arithmetic to explain.
 
-Two things were dropping them. The drift correction assumed the resting reading falls
-15 mL a minute, which over the bottle's usual quarter-hour disconnect subtracted 225 mL
-from any observed drop — more than a third of the bottle, so a drink taken while it was
-away was corrected out of existence. Session logs put the real figure nearer 3 mL a
-minute, wandering up as readily as down, so that is the default now, capped at 40 mL
-however long the gap.
+Two things were dropping them. One was the attempt to reconstruct a drink taken while
+the bottle was away, from the level saved before the disconnect: its drift correction
+assumed the resting reading falls 15 mL a minute, which over the bottle's usual
+quarter-hour disconnect subtracted 225 mL from any observed drop and corrected the
+drink out of existence; corrected to 3 mL a minute it then logged the zero's overnight
+slide as drinks instead. That whole path is gone — see "Calibration" above: a drink is a
+drop the app watched happen, and nothing across a gap is measured.
 
 The other is worse and quieter. CoreBluetooth relaunches this app when the bottle
 reconnects, and that often happens while the phone is locked — where its stored

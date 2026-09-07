@@ -8,8 +8,6 @@ public struct LevelChangeEvent: Sendable, Identifiable, Hashable {
     public let date: Date
     public let change: LevelChange
     public let stableRaw: Int
-    /// True when the volume was reconstructed across a disconnect (drift-corrected estimate).
-    public var approximate: Bool = false
 
     public var volumeML: Double { change.volumeML }
     public var isDrink: Bool { change.isDrink }
@@ -106,7 +104,6 @@ public final class HidrateBottleModel {
             // what keeps the bottle from being drawn empty until the next connection.
             store?.clearLastLevel()
             resetBelievedLevel(to: nil, at: Date())
-            pendingRecoveryCheck = false
         }
     }
 
@@ -178,7 +175,6 @@ public final class HidrateBottleModel {
         rememberedRaw = raw
         store?.saveLastRaw(raw, date: now)
         resetBelievedLevel(to: level, at: now)
-        pendingRecoveryCheck = false
         onZeroMoved?(shift)
         return shift
     }
@@ -205,7 +201,6 @@ public final class HidrateBottleModel {
         stableStreak = 0
         weightSampleCount = 0
         filter.reset()
-        pendingRecoveryCheck = false
         awaitingFirstSettledReading = false
         levelChanges = []
         sips = []
@@ -238,11 +233,6 @@ public final class HidrateBottleModel {
         set { tracker.configuration = newValue }
     }
 
-    /// Drift model used to recover drinks/refills that happened while disconnected.
-    public var driftModel = DriftModel()
-    /// Recover level changes measured across a disconnect. On by default because the PRO 2
-    /// disconnects every ~15 minutes, so many drinks happen while briefly away.
-    public var recoverAcrossDisconnects = true
 
     public var stabilityTolerance: Int {
         get { filter.tolerance }
@@ -261,7 +251,6 @@ public final class HidrateBottleModel {
     /// Watches every weight sample for the zero sinking on its own; the tracker discounts
     /// drops by it. Saved with the baseline so a relaunch starts knowing.
     private var creep = CreepEstimator()
-    private var pendingRecoveryCheck = false
     /// True until the first settled reading of a session, which is the one that has to
     /// account for anything drunk while the bottle was away.
     private var awaitingFirstSettledReading = false
@@ -413,9 +402,7 @@ public final class HidrateBottleModel {
     /// it reconnects, so a drink from earlier in the day is often found by nothing here.
     /// `volumeML` and `date` are the caller's own record of it for that case. Pass them
     /// only for a drink the bottle measured — one logged by hand never touched the
-    /// bottle. A drink recovered across a gap counts: it came off the believed level
-    /// like any other, or, when none was being carried, the reading that recovered it
-    /// reset the level afterwards and `believedLevelSetAt` keeps it from going back.
+    /// bottle.
     public func removeLevelChange(id: UUID, volumeML: Double? = nil, date: Date? = nil) {
         let event = levelChanges.first { $0.id == id }
         levelChanges.removeAll { $0.id == id }
@@ -523,15 +510,13 @@ public final class HidrateBottleModel {
             let wasReady = { if case .ready = connectionState { return true } else { return false } }()
             connectionState = state
             if case .ready = state, !wasReady {
-                // New live session: the next settled resting reading should be checked
-                // against the level saved before we disconnected.
-                pendingRecoveryCheck = recoverAcrossDisconnects
                 awaitingFirstSettledReading = true
-                // A session can start over without a disconnect in between — a second
-                // connect attempt completing on the bottle's old address, for one — and
-                // a drop held from the last one would be confirmed against a reading
-                // taken minutes later. It was for the recovery check to judge.
-                tracker.forgetHeldDrink()
+                // Whatever the bottle did while it was out of sight is not measured: the
+                // first reading of a session is where the bottle now sits, not a step
+                // from the last one seen. A session can start over without a disconnect
+                // in between — a second connect attempt completing on the bottle's old
+                // address, for one — and that is a gap too.
+                tracker.sessionStarted()
             }
             if !state.isConnected {
                 filter.reset()
@@ -593,13 +578,6 @@ public final class HidrateBottleModel {
         // zero. It is noted, so the log can explain a level that reads under nothing.
         let plausible = levelML >= belowEmptyNoteML
         let baselineBefore = tracker.baselineML
-        var recovered = false
-        if pendingRecoveryCheck {
-            pendingRecoveryCheck = false
-            // With a baseline in hand the tracker below does the work; recovery is for the
-            // case where there isn't one, and compares against the level saved to disk.
-            recovered = recoverAcrossGap(currentLevelML: baselineBefore ?? levelML, at: date)
-        }
 
         // A drop held back until it proved itself belongs at the moment it happened, not
         // at the reading a minute later that confirmed it.
@@ -622,7 +600,7 @@ public final class HidrateBottleModel {
         awaitingFirstSettledReading = false
         onSettledReading?(SettledReading(
             date: date, raw: raw, levelML: levelML, baselineBeforeML: baselineBefore,
-            change: change, recovered: recovered, plausible: plausible, isFirstOfSession: wasFirst,
+            change: change, plausible: plausible, isFirstOfSession: wasFirst,
             cappedFromML: cappedFromML
         ))
 
@@ -690,53 +668,5 @@ public final class HidrateBottleModel {
         believedLevelSetAt = date
         store?.saveBelievedLevelML(level)
         store?.saveBelievedLevelSetAt(date)
-    }
-
-    /// Returns true when it logged a recovered drink.
-    @discardableResult
-    private func recoverAcrossGap(currentLevelML: Double, at date: Date) -> Bool {
-        guard let previous = store?.loadLastLevel(), let capacity = calibration?.capacityML else { return false }
-        let gap = date.timeIntervalSince(previous.date)
-        guard gap > 30, gap <= driftModel.maxGapSeconds else { return false }
-        // The anchor before the gap must be a plausible fill level: below empty or above
-        // capacity there means the calibration was stale or the bottle was mid-handling,
-        // and a "drink" reconstructed from it is noise, not water. (This is what wrote a
-        // phantom 137 mL from two negative levels after a recalibration.) The reading now
-        // may sit below empty — that is where a sunk zero puts an emptied bottle — but
-        // past capacity it is nonsense again.
-        let slack = 0.15 * capacity
-        guard (-slack...(capacity + slack)).contains(previous.levelML),
-              currentLevelML <= capacity + slack else { return false }
-        // Only reconstruct DRINKS across a gap. An apparent increase while we were away is
-        // far more likely surface/thermal offset than a real refill, so never log a
-        // recovered refill.
-        let observedDrop = previous.levelML - currentLevelML
-        guard observedDrop > 0 else { return false }
-        // The drift model assumes the load cell's usual creep. A sensor just re-seated
-        // sinks far faster, and the tracker has been measuring it; when it has, that rate
-        // is what the gap cost, however much of the drop it accounts for.
-        let measuredPerMinute = tracker.creepMLPerSecond * 60
-        let corrected = measuredPerMinute > driftModel.mlPerMinute
-            ? max(observedDrop - measuredPerMinute * gap / 60, 0)
-            : driftModel.correctedDrop(observedDrop: observedDrop, gapSeconds: gap)
-        // Only what the bottle held can have left it; the rest of the drop is the zero
-        // having sunk while the bottle was away.
-        let contents = believedLevelML ?? previous.levelML
-        let volume = min(corrected, max(contents, 0))
-        guard volume >= tracker.configuration.minDrinkML else { return false }
-        let midpoint = previous.date.addingTimeInterval(gap / 2)
-        // It came off the level the app carries, if it is carrying one. When it isn't,
-        // the reading that follows starts that level from the scale, which is already
-        // net of the drink — and is a reset, so deleting the drink later puts nothing
-        // back, which is right: nothing was taken off.
-        if let believed = believedLevelML {
-            believedLevelML = max(believed - volume, 0)
-            store?.saveBelievedLevelML(believedLevelML)
-        }
-        let change = LevelChange.drink(volumeML: volume, fromML: previous.levelML, toML: currentLevelML)
-        let event = LevelChangeEvent(id: UUID(), date: midpoint, change: change, stableRaw: 0, approximate: true)
-        levelChanges.insert(event, at: 0)
-        onLevelChange?(event)
-        return true
     }
 }
