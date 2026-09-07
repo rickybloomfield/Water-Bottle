@@ -238,10 +238,13 @@ public struct CreepEstimator: Sendable {
 /// * **Nothing is measured across a gap.** A drink is a drop the tracker watched happen,
 ///   between readings within `handlingWindowSeconds` of each other in one connection.
 ///   After a silence, or a reconnect, the reading the bottle comes back at is adopted as
-///   the new baseline, up or down, and only a refill is reported. A slow slide that
-///   arrives as one step after an hour asleep is not a drink — a bottle nobody touched
-///   logged four of them in a night — and a real drink taken while the bottle was away is
-///   not measured either; it is reconciled when the bottle is marked empty.
+///   the new baseline, up or down, and only a refill is reported. If it comes back in a
+///   hand — further below than the bottle could have given — the baseline waits until it
+///   rests, and where it rests is adopted; the baseline from before the gap is never
+///   measured against. A slow slide that arrives as one step after an hour asleep is not
+///   a drink — a bottle nobody touched logged four of them in a night — and a real drink
+///   taken while the bottle was away is not measured either; it is reconciled when the
+///   bottle is marked empty.
 /// * **Below empty is still a reading.** A sunk zero puts an empty bottle under nothing,
 ///   and the water in it is measured from there like anywhere else. Nothing here decides
 ///   where empty is; that is the person's to say, on the bottle's page.
@@ -322,6 +325,10 @@ public struct LevelTracker: Sendable {
     private var lastReading: (levelML: Double, date: Date)?
     /// A drop being held until it proves itself.
     private var heldDrink: (fromML: Double, at: Date)?
+    /// True after a gap opened with the bottle in a hand or off its sensor. The baseline
+    /// from before the gap is kept but is not measured against: where the bottle rests
+    /// next is adopted, and nothing between is logged.
+    private var awaitingRest = false
     /// Since when the reading has sat further from the baseline than the bottle holds.
     /// A bottle picked up comes back within seconds; past `confirmSeconds` it was emptied
     /// or the sensor re-seated, and the baseline moves to wherever it is by then.
@@ -349,7 +356,7 @@ public struct LevelTracker: Sendable {
         let previous = lastReading
         lastReading = (levelML: levelML, date: date)
         let sinceLast = previous.map { date.timeIntervalSince($0.date) }
-        let followsOnFrom = sinceLast.map { $0 <= configuration.handlingWindowSeconds } ?? false
+        let followsOnFrom = !awaitingRest && (sinceLast.map { $0 <= configuration.handlingWindowSeconds } ?? false)
         let moreThanTheBottle = configuration.handlingFractionOfCapacity * capacityML
 
         // Further than the bottle could hold, moments after the last reading: the bottle
@@ -385,6 +392,19 @@ public struct LevelTracker: Sendable {
         // refill: a rise of most of a bottleful, or to the brim, is unmistakable.
         if !followsOnFrom {
             heldDrink = nil
+            if levelML < base, base - levelML > moreThanTheBottle {
+                // Further below than the bottle could have given: it is in a hand, or off
+                // its sensor — the bottle wakes and connects because it was picked up, as
+                // often as not, so a session's first reading is frequently this. Not a
+                // place to put the baseline. Not a place to measure from, either: where
+                // the bottle rests next is adopted, and the difference from before the
+                // gap is not a drink — a bottle set back down after an hour away read
+                // 160 mL lighter with nothing drunk. A lift that stays becomes the
+                // baseline in a minute, as any move does.
+                awaitingRest = true
+                return moved(to: levelML, from: base, at: date)
+            }
+            awaitingRest = false
             heldMove = nil
             baselineML = levelML
             return refill(from: base)
@@ -469,6 +489,7 @@ public struct LevelTracker: Sendable {
         if date.timeIntervalSince(since) >= configuration.confirmSeconds {
             heldMove = nil
             baselineML = levelML
+            awaitingRest = false
         }
         return .handled(levelML: levelML, deltaML: levelML - base)
     }
@@ -486,6 +507,7 @@ public struct LevelTracker: Sendable {
         }
         heldDrink = nil
         heldMove = nil
+        awaitingRest = false
         self.creepMLPerSecond = creepMLPerSecond
     }
 
@@ -507,5 +529,6 @@ public struct LevelTracker: Sendable {
         lastReading = nil
         heldDrink = nil
         heldMove = nil
+        awaitingRest = false
     }
 }

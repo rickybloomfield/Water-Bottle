@@ -217,7 +217,11 @@ So the app stops treating a full calibration as the fix for drift:
 * **A drink is a drop the app watched happen.** Only readings that follow on from one
   another, seconds apart in one connection, can measure one. Across a gap — the bottle
   asleep, the app relaunched, a reconnect — nothing is measured: the reading the bottle
-  comes back at becomes the baseline, up or down, and only a refill is reported. The
+  comes back at becomes the baseline, up or down, and only a refill is reported. If it
+  comes back in a hand, as it often does when it was picked up and woke, the baseline
+  waits until it rests and adopts that; the level from before the gap is never measured
+  against, since a bottle set down after an hour away read 160 mL lighter with nothing
+  drunk. The
   bottle sleeps for an hour at a stretch overnight, and a slow slide that is absorbed a
   millilitre at a time while connected arrives as one 20–75 mL step when it wakes; a
   bottle nobody touched logged four drinks that way in one night. The price is that a
