@@ -393,6 +393,10 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     public func disconnect() {
         queue.async {
             self.wantsConnection = false
+            // Not a retry of ours: a flag left over from an identity switch whose cancel
+            // never reported back made the disconnect that followed look like one, and
+            // the callback was swallowed — the page stayed "connected" after the tap.
+            self.manualRetryInProgress = false
             self.cancelHandshake()
             if let peripheral = self.peripheral {
                 self.central.cancelPeripheralConnection(peripheral)
