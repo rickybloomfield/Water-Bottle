@@ -113,10 +113,15 @@ struct SettingsView: View {
 
     private var lightSection: some View {
         @Bindable var app = app
-        return Section("Bottle light") {
+        return Section {
             Toggle("Glow when a drink is logged", isOn: $app.flashLEDOnDrink)
             Toggle("Glow when you reach your goal", isOn: $app.flashLEDOnGoal)
             Toggle("Glow when connected", isOn: $app.glowOnConnect)
+            Toggle("Bottle's own hourly reminders", isOn: $app.bottleGlowReminders)
+        } header: {
+            Text("Bottle light")
+        } footer: {
+            Text("The bottle can glow on its own schedule through the day. It never counts a drink itself, so it also judges a fuller bottle as behind and flashes red when it connects. Off keeps the schedule out of it.")
         }
     }
 

@@ -20,6 +20,10 @@ public struct BottleClientOptions: Sendable, Equatable {
     }
 
     public var handshake: HandshakeMode = .auto
+    /// Parts of the PRO 2 init to leave out. The reminder schedule is out by default: the
+    /// bottle never counts a drink itself, so against any schedule it believes nothing
+    /// has been drunk. See `PRO2InitPart` and `HidrateHandshake.pro2`.
+    public var pro2InitOmits: Set<PRO2InitPart> = [.reminderSlots]
     /// Write `0x57` automatically after subscribing and after every pending-record frame.
     public var autoDrainSips = true
     /// Subscribe to every notify/indicate characteristic, decoded or not (exploration mode).
@@ -33,8 +37,15 @@ public struct BottleClientOptions: Sendable, Equatable {
     /// seconds, so only the ~15 s notifications carry real values.
     public var weightPollInterval: TimeInterval? = nil
     /// After connecting, read every readable characteristic once and surface the values
-    /// as `rawValue` events. Cheap, and the fastest way to map unfamiliar firmware.
-    public var readUnknownCharacteristicsOnConnect = true
+    /// as `rawValue` events. The fastest way to map unfamiliar firmware — and off by
+    /// default now, while finding out whether one of those reads is what makes the PRO 2
+    /// flash red some 45 seconds after every connect. The Telink OTA characteristic is
+    /// first among them, and Telink firmware answers an OTA touch with a timer that ends
+    /// in an error indication.
+    public var readUnknownCharacteristicsOnConnect = false
+    /// Poll the light's state for two minutes after connecting, logging changes. A
+    /// diagnostic; the bottle answers reads slowly, and this queues a lot of them.
+    public var watchLightAfterConnect = false
     public var readDeviceInformation = true
     /// Re-issue the connect request whenever the link drops. CoreBluetooth then connects
     /// again as soon as the bottle is back in range, including from the background on iOS.
@@ -99,6 +110,13 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     private var deviceInformation: [String: String] = [:]
     private var keepAliveTimer: DispatchSourceTimer?
     private var weightPollTimer: DispatchSourceTimer?
+    /// Watches the light for a while after each connect. The bottle plays its own
+    /// patterns — a red flash was seen some seconds after reconnecting, written by nobody
+    /// — and the LED state characteristic reads back what is playing, so polling it and
+    /// logging changes is how to find out what the firmware did, and when.
+    private var ledWatchTimer: DispatchSourceTimer?
+    private var lastLEDState: Data?
+    private var ledWatchStarted: Date?
     private var connectAttemptStarted: Date?
     private var reconnectScanTimer: DispatchSourceTimer?
     private var reconnectScanActive = false
@@ -537,6 +555,34 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         keepAliveTimer = nil
         weightPollTimer?.cancel()
         weightPollTimer = nil
+        stopLEDWatch()
+    }
+
+    /// Read the light's state twice a second for `duration`, from now. Changes are
+    /// logged as they are seen; a steady state is not.
+    private func startLEDWatch(duration: TimeInterval = 120) {
+        stopLEDWatch()
+        guard let led = characteristic(HidrateUUID.ledState), led.properties.contains(.read) else { return }
+        let started = Date()
+        ledWatchStarted = started
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 0.5, repeating: 0.5)
+        timer.setEventHandler { [weak self] in
+            guard let self, let peripheral = self.peripheral, peripheral.state == .connected else { return }
+            if Date().timeIntervalSince(started) > duration {
+                self.log(.debug, "Light watch over")
+                self.stopLEDWatch()
+                return
+            }
+            peripheral.readValue(for: led)
+        }
+        timer.resume()
+        ledWatchTimer = timer
+    }
+
+    private func stopLEDWatch() {
+        ledWatchTimer?.cancel()
+        ledWatchTimer = nil
     }
 
     private func startWeightPolling() {
@@ -730,6 +776,8 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         lastSipFrameHex = nil
         sipFrameRepeat = 0
         deviceInformation = [:]
+        lastLEDState = nil
+        ledWatchStarted = nil
     }
 
     private func cancelHandshake() {
@@ -776,7 +824,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         if mode == .auto { mode = isPRO2 ? .pro2 : .capturedReplay }
         let steps: [HandshakeStep]?
         switch mode {
-        case .pro2: steps = HidrateHandshake.pro2()
+        case .pro2: steps = HidrateHandshake.pro2(omitting: _options.pro2InitOmits)
         case .capturedReplay: steps = HidrateHandshake.capturedReplay
         case .computed: steps = HidrateHandshake.computed()
         case .auto, .none: steps = nil
@@ -784,7 +832,8 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
 
         if let steps, characteristic(HidrateUUID.setPoint) != nil {
             state = .handshaking
-            log(.info, "Sending \(steps.count)-step \(mode.rawValue) init")
+            let omitted = mode == .pro2 ? _options.pro2InitOmits.map(\.rawValue).sorted().joined(separator: ", ") : ""
+            log(.info, "Sending \(steps.count)-step \(mode.rawValue) init" + (omitted.isEmpty ? "" : " without \(omitted)"))
             runHandshake(steps) { [weak self] in
                 self?.settleLEDAfterHandshake()
                 self?.subscribeToStreams()
@@ -847,6 +896,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         log(.info, "Ready. Sip path: \(protocolPath?.rawValue ?? "none")")
         startKeepAlive()
         startWeightPolling()
+        if _options.watchLightAfterConnect { startLEDWatch() }
         if _options.readUnknownCharacteristicsOnConnect {
             queue.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.readUnknownCharacteristics() }
         }
@@ -1145,6 +1195,13 @@ extension HidrateBottleClient: CBPeripheralDelegate {
             } else {
                 emit(.rawValue(CharacteristicValue(uuid: uuid, data: data, receivedAt: now)))
             }
+        case HidrateUUID.ledState:
+            // Polled while the watch runs, so only a change is worth a line.
+            guard data != lastLEDState else { return }
+            lastLEDState = data
+            let since = ledWatchStarted.map { String(format: " (+%.1f s after ready)", now.timeIntervalSince($0)) } ?? ""
+            log(.info, "Light state \(data.hexString)\(since)")
+            emit(.rawValue(CharacteristicValue(uuid: uuid, data: data, receivedAt: now)))
         case let u where u == dataCharacteristicUUID:
             handleSipFrame(data)
         case let u where HidrateUUID.deviceInformationCharacteristics.contains(u):

@@ -57,6 +57,12 @@ struct DebugView: View {
                     Text("None").tag(BottleClientOptions.HandshakeMode.none)
                 }
                 Toggle("Read unknown characteristics on connect", isOn: $app.readUnknownOnConnect)
+                ForEach(PRO2InitPart.allCases, id: \.self) { part in
+                    Toggle("Send \(part.title.lowercased())", isOn: Binding(
+                        get: { !app.pro2InitOmits.contains(part) },
+                        set: { if $0 { app.pro2InitOmits.remove(part) } else { app.pro2InitOmits.insert(part) } }
+                    ))
+                }
                 Toggle("Subscribe to all characteristics", isOn: $app.exploreAllCharacteristics)
             }
 

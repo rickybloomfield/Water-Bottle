@@ -137,7 +137,7 @@ public enum HidrateUUID {
             commandA2: "Command A2 (read/write)",
             commandB1: "Command B1 (write)",
             commandB2: "Command B2 (read/write)",
-            sensorSecondary: "Sensor 2 (unknown)",
+            sensorSecondary: "Light activity (01 blue, 03 red, 00 off)",
             referenceConfig: "Bottle Config (capacity mL)",
             ledState: "LED State",
             txPowerService: "Tx Power",

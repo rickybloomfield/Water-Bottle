@@ -70,7 +70,7 @@ Read from Ricky's bottle `h2o00008823` on 2026-09-03 (Device Information: manufa
 | `45855422-…` Reference | `016E11B1` read/write/notify (Data Point, **legacy path**); `316C4914` read/write; `B44B03F0` write/**notify** (Set Point) | No `BF2D1BA0` user service, so the legacy sip channel is used. Set Point can notify (command replies?). |
 | `4F817071-…` LED | `A1D9A5BF` write; `B810E826` read/write | As above. |
 | `593F756E-…` Debug | `E3578B0D` read/write/notify | Own service, like the Spark 3. |
-| `F65399A1-…` Sensor | `1807A063` read/notify (weight); `2007A063` read/notify (unknown) | Weight notifies only every ~15 s (raw ≈ 24990 at the time), so the SDK polls it by reading every 3 s. |
+| `F65399A1-…` Sensor | `1807A063` read/notify (weight); `2007A063` read/notify (light activity) | Weight notifies only every ~15 s (raw ≈ 24990 at the time), so the SDK polls it by reading every 3 s. `2007A063` notifies as the bottle's own light plays: `01` blue pattern, `03` red pattern, `00` off (matched to the second against a person watching, 7 September 2026). |
 
 Absent: Nordic DFU (`FE59`), Nordic UART, Environmental Sensing, accelerometer characteristics.
 
@@ -92,7 +92,7 @@ Absent: Nordic DFU (`FE59`), Nordic UART, Environmental Sensing, accelerometer c
 | `3BBD83E2`, `3BBD83F2` | `00` | Idle. |
 | LED state `B810E826` | `00 00 00 00` | Off. |
 | Weight `1807A063` (read) | `00` | **Reads return a single zero byte**; only notifications carry the value. |
-| Sensor 2 `2007A063` (read) | `00` | Same. |
+| Light activity `2007A063` (read) | `00` | Light off. |
 | Debug `E3578B0D` (read) | `80 02 00 00` | Cap closed; the read returns the same frame as the notification. |
 | Data Point after `0x57` | all zeros | Empty queue marker, so the legacy drain protocol is alive on this firmware. |
 
@@ -161,13 +161,30 @@ app's full initialisation. Ours was too sparse, and we used the wrong sip bytes.
   weight-after `0x5c91`. Same field layout the SipRecord parser already used.
 * **The init** (76 writes, replayed by `HidrateHandshake.pro2()`): write capacity to the
   config characteristic (`6d02`); `0x07` to command-A control; an LED byte; Set Point
-  opcodes `93 3d`, `9f`, `9c`; Debug commands `2201a3`, `2101xx`, `b1`, `b3`, `40`, `41`;
+  opcodes `93 3d`, `9f`, `9c`; Debug commands `2201a3`, `2101xx`, `b1`, `b3`, `40`, `41`
+  (see below — the last two are no longer replayed);
   the time of day (`77 00 00 00` + LE u32 seconds since midnight); Set Point `0xa0`; a full
   glow-reminder table (`nn 34` + target LE u16 + time LE u32 + `0100`, slots `00`–`0d`, then
   cleared slots up to `0x30`); and a protobuf goal/schedule blob to the command-A data
   channel (`3BBD83E2…`). `HidrateBottleClient` replays this verbatim, regenerating only the
   time, when it detects a PRO 2 (presence of the command-A channel).
 * Custom firmware is therefore **not required** to read intake from a PRO 2.
+* **The Debug commands, bisected on 7 September 2026** over 32 connects, relaunching the
+  app with parts of the init left out and reading the light-activity characteristic and
+  the weight cadence afterwards. `40` and `41` start the firmware's after-connect
+  routine, which arrives all at once anywhere from 1 s to 50 s after the init: a blue
+  flash (`40`, light activity `01`), the red pattern (`41`, `03`), and about 50 s of
+  weight notifications every 2 s instead of the usual 15 s. Without both, the bottle
+  stays dark and reports every 15 s from the start — which is all it does for the rest of
+  any session — and the first settled reading still lands around 15 s in, so
+  `HidrateHandshake.pro2()` no longer sends them. (A read of the weight characteristic
+  returns a lone `00` on this firmware, so the fast spell can't be had by polling
+  either; nothing in the app needs it.) `2201a3` and `21010f` left out silenced the
+  bottle for a minute once and not the next time; `b1` and `b3` changed nothing
+  observable. All four are still sent as captured.
+  The reminder-slot table is also written cleared by default (`PRO2InitPart.reminderSlots`);
+  the goal glow `93 3d`, the window `a0`, the goal blob, the slot table, the time, the
+  capacity and the remaining debug commands can each be left out for experiments.
 * **This 21 oz chug-lid unit has no lid sensor.** Only cap "closed" is ever reported and the
   bottle never queues a sip record for a third party, so intake is **weight-only** in
   practice. With the full init (2 s weight) and a fresh calibration this is reliable: 50 mL

@@ -204,6 +204,22 @@ final class AppState {
             model.client.options = options
         }
     }
+    /// Parts of the PRO 2 init left out on the next connect. The reminder schedule is
+    /// out by default; the rest are for finding what the bottle flashes red about — see
+    /// `PRO2InitPart`. Takes effect on the next connection.
+    var pro2InitOmits: Set<PRO2InitPart> {
+        didSet {
+            defaults.set(pro2InitOmits.map(\.rawValue).sorted(), forKey: Keys.pro2InitOmits)
+            var options = model.client.options
+            options.pro2InitOmits = pro2InitOmits
+            model.client.options = options
+        }
+    }
+    /// Let the bottle glow on its own hourly schedule.
+    var bottleGlowReminders: Bool {
+        get { !pro2InitOmits.contains(.reminderSlots) }
+        set { if newValue { pro2InitOmits.remove(.reminderSlots) } else { pro2InitOmits.insert(.reminderSlots) } }
+    }
     var drinkLEDByte: Int { didSet { defaults.set(drinkLEDByte, forKey: Keys.ledByte) } }
     var ledStopEnabled: Bool { didSet { defaults.set(ledStopEnabled, forKey: Keys.ledStop) } }
     var ledStopByte: Int { didSet { defaults.set(ledStopByte, forKey: Keys.ledStopByte) } }
@@ -249,6 +265,7 @@ final class AppState {
         static let flashLED = "app.flashLEDOnDrink"
         static let flashGoalLED = "app.flashLEDOnGoal"
         static let glowOnConnect = "app.glowOnConnect"
+        static let pro2InitOmits = "app.pro2InitOmits"
         static let autoConnect = "app.autoConnect"
         static let unit = "app.unit"
         static let goal = "app.dailyGoalML"
@@ -272,7 +289,7 @@ final class AppState {
         let exploreAll = UserDefaults.standard.bool(forKey: Keys.exploreAll)
         options.subscribeToAllNotifying = exploreAll
         exploreAllCharacteristics = exploreAll
-        let readUnknown = UserDefaults.standard.object(forKey: Keys.readUnknown) as? Bool ?? true
+        let readUnknown = UserDefaults.standard.object(forKey: Keys.readUnknown) as? Bool ?? false
         options.readUnknownCharacteristicsOnConnect = readUnknown
         readUnknownOnConnect = readUnknown
         unit = defaults.string(forKey: Keys.unit).flatMap(VolumeUnit.init(rawValue:)) ?? .ounces
@@ -283,6 +300,30 @@ final class AppState {
         let glow = defaults.object(forKey: Keys.glowOnConnect) as? Bool ?? false
         options.ledOnConnect = glow ? LEDPattern.greenGlow.rawValue : 0x00
         glowOnConnect = glow
+        var omits = (defaults.stringArray(forKey: Keys.pro2InitOmits)).map { Set($0.compactMap(PRO2InitPart.init(rawValue:))) }
+            ?? [.reminderSlots]
+        // Dev only: launch with `-pro2Omits a,b,c` to leave those parts of the PRO 2 init
+        // out for this run alone, without touching the setting — for bisecting what the
+        // bottle reacts to, one relaunch per test.
+        let args = ProcessInfo.processInfo.arguments
+        var omitsSource = "setting"
+        if let i = args.firstIndex(of: "-pro2Omits"), i + 1 < args.count {
+            omits = Set(args[i + 1].split(separator: ",").compactMap { PRO2InitPart(rawValue: String($0)) })
+            omitsSource = "launch argument"
+        }
+        // Or from a file dropped into Documents with `devicectl device copy to`, which
+        // reaches the app however it was launched — CoreBluetooth relaunches it itself,
+        // and a launch argument doesn't survive that.
+        if let documents = try? FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: false),
+           let text = try? String(contentsOf: documents.appendingPathComponent("pro2-omits.txt"), encoding: .utf8),
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            omits = Set(text.split(whereSeparator: { $0 == "," || $0.isWhitespace })
+                .compactMap { PRO2InitPart(rawValue: String($0)) })
+            omitsSource = "Documents/pro2-omits.txt"
+        }
+        options.pro2InitOmits = omits
+        pro2InitOmits = omits
+        let omitsNote = "pro2 init omits (\(omitsSource)): \(omits.map(\.rawValue).sorted().joined(separator: ","))"
         drinkLEDByte = defaults.object(forKey: Keys.ledByte) as? Int ?? Int(LEDPattern.drinkSuccess.rawValue)
         ledStopEnabled = defaults.object(forKey: Keys.ledStop) as? Bool ?? true
         ledStopByte = defaults.object(forKey: Keys.ledStopByte) as? Int ?? 0x00 // best guess for "off"
@@ -311,6 +352,7 @@ final class AppState {
         if let active = roster.active { model.activate(store: active.store()) }
         adoptedDrinkIDs = (defaults.stringArray(forKey: Keys.adopted) ?? []).compactMap(UUID.init(uuidString:))
         loadEntries()
+        sessionLog.write(omitsNote)
 
         if let data = defaults.data(forKey: Keys.tracker),
            let configuration = try? JSONDecoder().decode(LevelTracker.Configuration.self, from: data) {

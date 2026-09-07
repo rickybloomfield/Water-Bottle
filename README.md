@@ -316,20 +316,30 @@ used to end the same way: an empty bottle on the Today tab until the bottle reco
 ## The bottle's light
 
 The bottle only lights up for three things: a drink the app logged, reaching the day's
-goal, and its own scheduled glow reminders, which the firmware runs from the slot table
-written during the connection handshake.
+goal, and — off by default — its own scheduled glow reminders, which the firmware runs
+from the slot table written during the connection handshake.
 
-The handshake also left the light doing something on every connect. Since the PRO 2 drops
-the link roughly every fifteen minutes, that is a flash four times an hour for nothing, so
-the client writes a byte of its own as soon as the handshake finishes: the off byte
-(`0x00`) by default, or the green glow (`0xB4`) with **Settings → Bottle light → Glow when
-connected** turned on. It is off by default, for the same four-times-an-hour reason. The
+It used to light up on every connect as well: a blue flash and then its red *error*
+preset, some seconds to a minute after the handshake, four times an hour for nothing.
+The handshake replays the official app's initialisation, and two of its debug commands,
+`40` and `41`, are what start the firmware's after-connect routine: that pair of lights,
+plus fifty seconds of weight reports every two seconds instead of every fifteen. They
+were found by bisection — relaunching the app with parts of the init left out, one
+relaunch per test, and reading back the bottle's light-activity characteristic, which
+announces `01` for blue and `03` for red as they play — and they are not replayed any
+more. The bottle now reports every fifteen seconds from the moment it connects, which is
+what it did for the rest of every session anyway, and the first settled reading arrives
+just as soon as before.
+
+The client still writes the off byte (`0x00`) as soon as the handshake finishes, or the
+green glow (`0xB4`) with **Settings → Bottle light → Glow when connected** turned on. The
 three lights above all happen after that point, so none of them are affected.
 
 Settings offers the three lights and nothing else. The colours are firmware presets and
 picking between them is a thing to test rather than a thing to set, so the list of them —
 each firing on the connected bottle when tapped — is in **Settings → Debug → Light
-patterns**, along with the raw byte for the drink light.
+patterns**, along with the raw byte for the drink light. The same screen can leave
+parts of the init out on the next connect, for the next such hunt.
 
 ## When a drink goes missing
 
