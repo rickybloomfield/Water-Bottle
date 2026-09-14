@@ -45,6 +45,7 @@ struct HydrationProvider: TimelineProvider {
         rolledOver.day = midnight
         rolledOver.totalML = 0
         rolledOver.lastDrinkDate = nil
+        rolledOver.drinks = []
         entries.append(HydrationEntry(date: midnight, snapshot: rolledOver))
 
         // The hourly wake is a safety net for the days the app never gets to run.

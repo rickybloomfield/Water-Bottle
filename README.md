@@ -26,27 +26,41 @@ Talk to a HidrateSpark PRO water bottle directly over Bluetooth, without the off
   lights, Health access, and a Debug area with the engineering tools.
 * **`App/HidrateWidgets`** (iOS widget): the day's ring on the home screen, with one-tap
   amounts on the medium size, plus lock-screen accessory sizes.
-* **`App/HidrateWatchApp`** (watchOS) and **`App/HidrateWatchWidgets`**: the same ring and
-  the same one-tap amounts on the wrist, and a complication showing the ring with the
-  number inside it.
+* **`App/HidrateWatchApp`** (watchOS) and **`App/HidrateWatchWidgets`**: the same ring on
+  the wrist with the day's drinks listed under it — swipe one away to delete it, tap the
+  plus for the one-tap amounts — and a complication showing the ring with the number
+  inside it.
 * **`docs/PROTOCOL.md`**: everything known about the BLE protocol.
   **`docs/FIRMWARE.md`**: what changing the firmware would actually take.
 
 ## The widget, the watch and the complication
 
 All three draw the same thing: today's total as a ring against your goal, and the amounts
-from the app's log sheet as one-tap buttons.
+from the app's log sheet as one-tap buttons. The watch app also lists the day's drinks
+under the ring, and a swipe deletes one.
 
-They share one small value, `HydrationSnapshot` — today's total, the goal, your unit — that
-the phone app writes to the `group.com.rickybloomfield.HidrateTestApp` app group after
-every change, and pushes to the watch over WatchConnectivity. Nothing else crosses the
-boundary, so the widget and the watch never need HidrateKit, Bluetooth or Health.
+They share one small value, `HydrationSnapshot` — today's total, the goal, your unit, and
+the day's drinks as amounts, times and where each came from — that the phone app writes to
+the `group.com.rickybloomfield.HidrateTestApp` app group after every change, and pushes to
+the watch over WatchConnectivity. Nothing else crosses the boundary, so the widget and the
+watch never need HidrateKit, Bluetooth or Health.
 
 A tap on the widget or the watch does not wait for the app. It goes into a pending queue
 next to the snapshot and counts toward the displayed total straight away; when the phone
 app next runs it adopts those drinks into its history and writes them to Apple Health,
 then echoes their ids back so the sender stops counting them itself. So a drink logged on
 a watch out of range of the phone still lands, exactly once.
+
+A swipe on the watch is the same thing in reverse. The drink leaves the list and the total
+at once, and a deletion request goes to the phone, which removes the drink from its history
+and from Apple Health and echoes the request's id back — the request's, not the drink's,
+because the drink's id may already have been echoed when it was adopted, and that would
+have the watch treat the deletion as done before it was. Until the echo, the watch keeps
+the drink hidden through any snapshot that still lists it; if Health wouldn't let it go,
+the echo arrives with the drink still listed, and it comes back. A drink tapped on the
+watch and swiped away before the phone has taken it is simply un-tapped, and its queued
+transfer withdrawn — and the phone remembers the deleted id, so a copy of the drink that
+overtook the deletion is not adopted after it.
 
 Keeping the three of them agreeing takes three rules:
 
@@ -57,8 +71,9 @@ Keeping the three of them agreeing takes three rules:
   phone comes back into range, it sends a message — which wakes the phone, has it adopt
   anything sitting in the widget's queue, and replies with the result. That is the path a
   widget tap takes to the wrist.
-* **A drink from the watch goes out twice**, as a live message and as a queued transfer.
-  The phone keys drinks by id, so arriving twice costs nothing, and arriving late does.
+* **A drink or a deletion from the watch goes out twice**, as a live message and as a
+  queued transfer. The phone keys both by id, so arriving twice costs nothing, and
+  arriving late does.
 
 The circular complication takes its size from a gauge and everything else from us. A
 complication's circle is not the size of its slot — measured off a photograph of a real

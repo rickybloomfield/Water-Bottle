@@ -1,8 +1,8 @@
 import Foundation
 
-/// Everything the widget, the complication and the watch app need to draw today's ring
-/// and offer a one-tap drink. The phone app owns it and writes it to the shared app
-/// group after every change.
+/// Everything the widget, the complication and the watch app need to draw today's ring,
+/// offer a one-tap drink, and — on the watch — list the day's drinks. The phone app owns
+/// it and writes it to the shared app group after every change.
 struct HydrationSnapshot: Codable, Hashable, Sendable {
     /// The day `totalML` belongs to, so a widget that wakes up after midnight knows the
     /// number it is holding is yesterday's.
@@ -14,9 +14,13 @@ struct HydrationSnapshot: Codable, Hashable, Sendable {
     /// 0…1, how full the bottle itself is, when we have a live reading.
     var bottleFillFraction: Double?
     var isBottleConnected: Bool = false
-    /// Drinks logged from the widget or the watch that the phone has now taken over, so
-    /// the sender can stop counting them locally.
+    /// Drinks logged from the widget or the watch that the phone has now taken over, and
+    /// deletions asked for from the watch that it has dealt with — by the request's own
+    /// id — so the sender can stop adjusting for them locally.
     var acknowledgedDrinkIDs: [UUID] = []
+    /// Today's drinks, newest first, so the watch can list them and offer to remove one.
+    /// Optional so an older stored snapshot still decodes.
+    var drinks: [Drink]?
     /// The hours you drink across, from the reminder settings, as minutes after midnight.
     /// Optional so an older stored snapshot still decodes.
     var windowStartMinutes: Int?
@@ -78,6 +82,13 @@ struct HydrationSnapshot: Codable, Hashable, Sendable {
             && acknowledgedDrinkIDs == other.acknowledgedDrinkIDs
     }
 
+    /// `matchesDisplay`, and the day's list as well: what the watch app shows beyond the
+    /// ring. A corrected time, or a drink deleted and logged again, changes this and not
+    /// the face — which earns the watch a new context, and the widget no reload.
+    func matchesContent(of other: HydrationSnapshot) -> Bool {
+        matchesDisplay(of: other) && (drinks ?? []) == (other.drinks ?? [])
+    }
+
     /// `matchesDisplay` as a value, for remembering what a face was last given.
     var displayFingerprint: String {
         "\(Int(day.timeIntervalSince1970))|\(totalML)|\(goalML)|\(unit.rawValue)|\(windowStart)|\(windowEnd)|\(acknowledgedDrinkIDs.count)"
@@ -93,6 +104,66 @@ struct HydrationSnapshot: Codable, Hashable, Sendable {
 
     func volume(_ ml: Double) -> String { unit.format(ml) }
     func number(_ ml: Double) -> String { unit.number(ml) }
+}
+
+extension HydrationSnapshot {
+    /// One of today's drinks as the watch sees it: enough to draw a row and to ask the
+    /// phone to remove it, without the watch knowing about entries, samples or Health.
+    struct Drink: Codable, Hashable, Sendable, Identifiable {
+        enum Origin: String, Codable, Sendable {
+            case bottle
+            case manual
+            case widget
+            case watch
+            case emptied
+            /// Written to Apple Health by another app. The phone reads it and counts it,
+            /// and can no more delete it than the watch can.
+            case health
+        }
+
+        var id: UUID
+        var date: Date
+        var volumeML: Double
+        var origin: Origin
+        /// For a Health sample, the app that wrote it.
+        var sourceName: String?
+        var approximate: Bool = false
+
+        var canDelete: Bool { origin != .health }
+
+        var symbolName: String {
+            switch origin {
+            case .bottle: "waterbottle.fill"
+            case .manual: "hand.tap.fill"
+            case .widget: "square.grid.2x2.fill"
+            case .watch: "applewatch"
+            case .emptied: "waterbottle"
+            case .health: "heart.fill"
+            }
+        }
+
+        /// Where the drink came from, in a word or two: a watch row has no room for more.
+        var label: String {
+            switch origin {
+            case .bottle: "Bottle"
+            case .manual: "By hand"
+            case .widget: "Widget"
+            case .watch: "Watch"
+            case .emptied: "Left in bottle"
+            case .health: sourceName ?? "Health"
+            }
+        }
+    }
+}
+
+/// A drink removed on the watch, waiting for the phone to take it out of its history and
+/// out of Apple Health. It has an id of its own, distinct from the drink's, and that is
+/// what the phone acknowledges: the drink's id may already be acknowledged from when the
+/// drink was adopted, which would have the watch treat the deletion as done at once.
+struct DrinkDeletion: Codable, Hashable, Sendable, Identifiable {
+    var id: UUID = UUID()
+    var drinkID: UUID
+    var date: Date = Date()
 }
 
 /// A drink logged from the widget or the watch, waiting for the phone app to adopt it

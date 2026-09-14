@@ -237,6 +237,10 @@ final class AppState {
     /// Ids of widget and watch drinks already folded into `entries`, echoed back in the
     /// snapshot so the watch knows to stop counting them itself.
     var adoptedDrinkIDs: [UUID] = [] { didSet { defaults.set(adoptedDrinkIDs.map(\.uuidString), forKey: Keys.adopted) } }
+    /// Ids of drinks the watch asked to delete, so a copy of one arriving late — the
+    /// watch sends a drink twice, and a deletion can overtake the slower route — is not
+    /// adopted after the deletion has been carried out.
+    var deletedDrinkIDs: [UUID] = [] { didSet { defaults.set(deletedDrinkIDs.map(\.uuidString), forKey: Keys.deleted) } }
 
     /// The most recent time the zero moved, so the Bottle tab can say it happened.
     struct ZeroMove: Equatable {
@@ -277,6 +281,7 @@ final class AppState {
         static let ledStopDelay = "app.ledStopDelay"
         static let tracker = "app.trackerConfiguration"
         static let adopted = "app.adoptedDrinkIDs"
+        static let deleted = "app.deletedDrinkIDs"
     }
 
     init() {
@@ -351,6 +356,7 @@ final class AppState {
         // the calibration of the bottle it came from.
         if let active = roster.active { model.activate(store: active.store()) }
         adoptedDrinkIDs = (defaults.stringArray(forKey: Keys.adopted) ?? []).compactMap(UUID.init(uuidString:))
+        deletedDrinkIDs = (defaults.stringArray(forKey: Keys.deleted) ?? []).compactMap(UUID.init(uuidString:))
         loadEntries()
         sessionLog.write(omitsNote)
 
@@ -361,6 +367,8 @@ final class AppState {
 
         PhoneWatchLink.shared.activate { [weak self] drink in
             self?.adopt(drink)
+        } onDeletion: { [weak self] deletion in
+            await self?.remove(deletion)
         } currentSnapshot: { [weak self] in
             guard let self else { return HydrationSnapshot() }
             await self.catchUp()

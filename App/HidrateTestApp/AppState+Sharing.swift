@@ -16,6 +16,7 @@ extension AppState {
         snapshot.bottleFillFraction = model.displayFillFraction
         snapshot.isBottleConnected = model.isConnected
         snapshot.acknowledgedDrinkIDs = adoptedDrinkIDs
+        snapshot.drinks = todayItems.map(\.shared)
         snapshot.windowStartMinutes = reminders.startMinutes
         snapshot.windowEndMinutes = reminders.endMinutes
         return snapshot
@@ -28,7 +29,12 @@ extension AppState {
     /// the budget on nothing and left real changes to arrive late.
     func publishSnapshot(force: Bool = false) {
         let snapshot = snapshot
-        let changed = HydrationStore.storedSnapshotIfAny().map { !snapshot.matchesDisplay(of: $0) } ?? true
+        let stored = HydrationStore.storedSnapshotIfAny()
+        // The face — the widget, the complication — draws the numbers; the watch app
+        // lists the drinks as well. A drink deleted and logged again changes the list and
+        // not the face, and that earns the watch a context but the widget no reload.
+        let faceChanged = stored.map { !snapshot.matchesDisplay(of: $0) } ?? true
+        let changed = faceChanged || stored.map { !snapshot.matchesContent(of: $0) } ?? true
         guard force || changed else { return }
         HydrationStore.save(snapshot)
         // A forced publish — every launch — writes the store and tells the watch, but only
@@ -36,7 +42,7 @@ extension AppState {
         // so that reload counts against the widget's daily budget, and on a day this app
         // is launched dozens of times the budget was gone by mid-afternoon: the widget
         // then sat on an old number while the provider was never run for the new one.
-        if changed { HydrationStore.reloadWidgets() }
+        if faceChanged { HydrationStore.reloadWidgets() }
         PhoneWatchLink.shared.publish(snapshot)
         Task { await rescheduleReminders() }
     }
@@ -65,9 +71,11 @@ extension AppState {
     /// Also the landing point for a drink arriving from the watch.
     func adopt(_ drink: PendingDrink) {
         rememberAdopted(drink.id)
-        guard !entries.contains(where: { $0.id == drink.id }) else {
+        guard !entries.contains(where: { $0.id == drink.id }), !deletedDrinkIDs.contains(drink.id) else {
             // The watch resends until it sees its id acknowledged, so this is the normal
             // path for a duplicate. Publish anyway: the acknowledgement is what stops it.
+            // Likewise a drink the watch has since asked to delete, if the deletion
+            // overtook it on the way here: adopting it now would bring it back.
             publishSnapshot()
             return
         }
@@ -76,11 +84,60 @@ extension AppState {
                   source: drink.origin == .watch ? .watch : .widget)
     }
 
+    /// A drink swiped away on the watch. Acknowledged whatever happens, by the request's
+    /// own id, so the watch stops hiding the drink and shows whatever this app lists
+    /// next: nothing, normally, or the drink again if Health wouldn't let it go. And the
+    /// drink's id is remembered, so a copy of it still on its way here is not adopted
+    /// after the deletion has been carried out.
+    func remove(_ deletion: DrinkDeletion) async {
+        rememberAdopted(deletion.id)
+        rememberDeleted(deletion.drinkID)
+        guard let entry = entries.first(where: { $0.id == deletion.drinkID }) else {
+            sessionLog.write("watch asked to delete a drink this app doesn't hold: \(deletion.drinkID)")
+            publishSnapshot()
+            return
+        }
+        sessionLog.write("deleting \(Int(entry.volumeML))mL at the watch's request")
+        await delete(entry)
+    }
+
     private func rememberAdopted(_ id: UUID) {
         guard !adoptedDrinkIDs.contains(id) else { return }
         adoptedDrinkIDs.append(id)
         // The watch only needs the recent ones; anything older it has long since dropped.
         if adoptedDrinkIDs.count > 50 { adoptedDrinkIDs.removeFirst(adoptedDrinkIDs.count - 50) }
+    }
+
+    private func rememberDeleted(_ id: UUID) {
+        guard !deletedDrinkIDs.contains(id) else { return }
+        deletedDrinkIDs.append(id)
+        if deletedDrinkIDs.count > 50 { deletedDrinkIDs.removeFirst(deletedDrinkIDs.count - 50) }
+    }
+}
+
+extension AppState.TodayItem {
+    /// The drink as the watch sees it.
+    var shared: HydrationSnapshot.Drink {
+        switch self {
+        case .entry(let entry):
+            HydrationSnapshot.Drink(id: entry.id, date: entry.date, volumeML: entry.volumeML,
+                                    origin: entry.source.shared, approximate: entry.approximate)
+        case .health(let sample):
+            HydrationSnapshot.Drink(id: sample.id, date: sample.date, volumeML: sample.milliliters,
+                                    origin: .health, sourceName: sample.sourceName)
+        }
+    }
+}
+
+extension IntakeEntry.Source {
+    var shared: HydrationSnapshot.Drink.Origin {
+        switch self {
+        case .weight, .sipFrame: .bottle
+        case .manual: .manual
+        case .widget: .widget
+        case .watch: .watch
+        case .emptied: .emptied
+        }
     }
 }
 

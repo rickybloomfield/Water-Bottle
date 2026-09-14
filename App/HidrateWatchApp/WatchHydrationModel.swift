@@ -15,7 +15,16 @@ final class WatchHydrationModel {
     static let shared = WatchHydrationModel()
 
     private(set) var snapshot = HydrationStore.currentSnapshot()
-    private(set) var pendingCount = HydrationStore.pendingDrinks().count
+    /// Drinks tapped here that the phone hasn't confirmed yet.
+    private(set) var pendingIDs = Set(HydrationStore.pendingDrinks().map(\.id))
+
+    var pendingCount: Int { pendingIDs.count }
+
+    /// Today's drinks, newest first: the phone's list, less anything deleted here that
+    /// it hasn't confirmed gone, plus anything tapped here that it hasn't adopted.
+    var drinks: [HydrationSnapshot.Drink] { snapshot.drinks ?? [] }
+
+    func isPending(_ drink: HydrationSnapshot.Drink) -> Bool { pendingIDs.contains(drink.id) }
 
     private let link = WatchPhoneLink()
 
@@ -40,8 +49,7 @@ final class WatchHydrationModel {
     /// Called when the app comes back to the front: re-read the store and ask the phone
     /// for anything logged on it since.
     func refresh() {
-        snapshot = HydrationStore.currentSnapshot()
-        pendingCount = HydrationStore.pendingDrinks().count
+        reread()
         DiagnosticLog.write("refresh app=\(DiagnosticLog.appState) showing=[\(snapshot.summary)] pending=\(pendingCount) lastGetTimeline=[\(HydrationStore.lastTimelineRun)] \(link.stateDescription)")
         link.requestSnapshot()
         Self.logConfiguredWidgets()
@@ -61,11 +69,35 @@ final class WatchHydrationModel {
         }
     }
 
+    private func reread() {
+        snapshot = HydrationStore.currentSnapshot()
+        pendingIDs = Set(HydrationStore.pendingDrinks().map(\.id))
+    }
+
     func log(volumeML: Double) {
         let drink = HydrationStore.addPendingDrink(volumeML: volumeML, origin: .watch)
-        refresh()
+        // Re-read rather than refresh: the message carrying the drink brings the phone's
+        // answer back with it, so asking for a snapshot as well woke the phone twice.
+        reread()
         reloadComplicationIfNeeded(reason: "logged \(Int(volumeML))mL")
         link.send(drink)
+    }
+
+    /// Take a drink off the day, here at once and on the phone when it can be reached.
+    ///
+    /// One tapped here and never confirmed is simply un-tapped, and its queued transfer
+    /// withdrawn if the phone hasn't taken it yet. One the phone lists is hidden, and
+    /// subtracted, until the phone says it is gone — or lists it again, if Health kept
+    /// it. The phone is asked either way: a drink tapped here can have reached it a
+    /// moment ago with the reply still on its way back.
+    func delete(_ drink: HydrationSnapshot.Drink) {
+        let deletion = DrinkDeletion(drinkID: drink.id)
+        HydrationStore.removePending(ids: [drink.id])
+        link.withdrawQueuedDrink(id: drink.id)
+        HydrationStore.addPendingDeletion(deletion)
+        reread()
+        reloadComplicationIfNeeded(reason: "deleted \(Int(drink.volumeML))mL")
+        link.send(deletion)
     }
 
     /// Ask WidgetKit to re-run the timeline, but only when what it would draw has
@@ -104,10 +136,11 @@ final class WatchHydrationModel {
             return DiagnosticLog.write("adopt via \(route) ignored: incoming=[\(incoming.summary)] is older than stored=[\(stored.summary)]")
         }
         HydrationStore.save(incoming)
-        // The phone has taken these over; they're in its total now, so stop adding them.
+        // The phone has dealt with these — the drinks are in its total now, the
+        // deletions answered one way or the other — so stop adjusting for them here.
         HydrationStore.removePending(ids: incoming.acknowledgedDrinkIDs)
-        snapshot = HydrationStore.currentSnapshot()
-        pendingCount = HydrationStore.pendingDrinks().count
+        HydrationStore.removePendingDeletions(ids: incoming.acknowledgedDrinkIDs)
+        reread()
         DiagnosticLog.write("adopt via \(route) app=\(DiagnosticLog.appState) incoming=[\(incoming.summary)] over stored=[\(stored?.summary ?? "nothing")]")
         reloadComplicationIfNeeded(reason: "adopt via \(route)")
     }
@@ -149,17 +182,37 @@ private final class WatchPhoneLink: NSObject {
         }
     }
 
+    func send(_ drink: PendingDrink) {
+        send(WatchMessage.encode(drink, forKey: WatchMessage.drinkKey), describing: "drink \(Int(drink.volumeML))mL")
+    }
+
+    func send(_ deletion: DrinkDeletion) {
+        send(WatchMessage.encode(deletion, forKey: WatchMessage.deletionKey), describing: "deletion")
+    }
+
+    /// Take a drink back out of the queue to the phone, if it is still waiting there.
+    /// Nothing to do once it has gone: the deletion sent after it finds it on the phone.
+    func withdrawQueuedDrink(id: UUID) {
+        guard WCSession.isSupported() else { return }
+        for transfer in WCSession.default.outstandingUserInfoTransfers {
+            guard let drink = WatchMessage.decode(PendingDrink.self, from: transfer.userInfo, key: WatchMessage.drinkKey),
+                  drink.id == id else { continue }
+            transfer.cancel()
+            DiagnosticLog.write("withdrew queued drink \(Int(drink.volumeML))mL")
+        }
+    }
+
     /// Two routes on purpose. The queued transfer always lands eventually, even out of
     /// range; the live message lands now when the phone is reachable. The phone keys
-    /// drinks by id, so arriving twice costs nothing and is far better than arriving late.
-    func send(_ drink: PendingDrink) {
+    /// drinks and deletions by id, so arriving twice costs nothing and is far better
+    /// than arriving late.
+    private func send(_ payload: [String: Any], describing what: String) {
         guard WCSession.isSupported(), WCSession.default.activationState == .activated else {
-            return DiagnosticLog.write("send drink skipped: \(stateDescription)")
+            return DiagnosticLog.write("send \(what) skipped: \(stateDescription)")
         }
-        let payload = WatchMessage.encode(drink, forKey: WatchMessage.drinkKey)
         let session = WCSession.default
         session.transferUserInfo(payload)
-        DiagnosticLog.write("send drink \(Int(drink.volumeML))mL queued; reachable=\(session.isReachable)")
+        DiagnosticLog.write("send \(what) queued; reachable=\(session.isReachable)")
         guard session.isReachable else { return }
         // `@Sendable` matters: written bare inside a @MainActor type, the closure is
         // inferred main-actor isolated, and WatchConnectivity calls it back on its own
@@ -167,10 +220,10 @@ private final class WatchPhoneLink: NSObject {
         // with the value.
         session.sendMessage(payload, replyHandler: { @Sendable [weak self] reply in
             guard let snapshot = WatchMessage.decode(HydrationSnapshot.self, from: reply, key: WatchMessage.snapshotKey) else {
-                return DiagnosticLog.write("drink reply carried no snapshot: keys=\(Array(reply.keys))")
+                return DiagnosticLog.write("\(what) reply carried no snapshot: keys=\(Array(reply.keys))")
             }
-            Task { @MainActor in self?.onSnapshot?(snapshot, "reply(drink)") }
-        }, errorHandler: { @Sendable error in DiagnosticLog.write("drink message failed: \(error)") })
+            Task { @MainActor in self?.onSnapshot?(snapshot, "reply(\(what))") }
+        }, errorHandler: { @Sendable error in DiagnosticLog.write("\(what) message failed: \(error)") })
     }
 
     /// Ask the phone what today looks like. The phone catches up before it answers, so

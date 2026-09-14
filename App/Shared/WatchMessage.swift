@@ -7,6 +7,8 @@ enum WatchMessage {
     static let snapshotKey = "snapshot"
     /// Watch → phone, as user info: a drink tapped on the wrist.
     static let drinkKey = "drink"
+    /// Watch → phone, as user info: a drink swiped away on the wrist.
+    static let deletionKey = "deletion"
     /// Watch → phone, when it wakes and wants the current numbers.
     static let requestKey = "request"
     /// Watch → phone, as user info: lines from the watch's diagnostic log, which can only

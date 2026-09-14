@@ -88,6 +88,6 @@ extension HydrationSnapshot {
     /// The fields that matter when reading a log: whose day it is, the numbers, and when
     /// the phone wrote it.
     var summary: String {
-        "day=\(DiagnosticLog.stamp(day).prefix(10)) total=\(Int(totalML.rounded()))mL goal=\(Int(goalML.rounded()))mL acks=\(acknowledgedDrinkIDs.count) updated=\(DiagnosticLog.stamp(updated))"
+        "day=\(DiagnosticLog.stamp(day).prefix(10)) total=\(Int(totalML.rounded()))mL goal=\(Int(goalML.rounded()))mL drinks=\(drinks?.count ?? 0) acks=\(acknowledgedDrinkIDs.count) updated=\(DiagnosticLog.stamp(updated))"
     }
 }

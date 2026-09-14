@@ -9,6 +9,8 @@ final class PhoneWatchLink: NSObject {
     static let shared = PhoneWatchLink()
 
     private var onDrink: ((PendingDrink) -> Void)?
+    /// A drink swiped away on the watch; waited for, since removing one means Health.
+    private var onDeletion: ((DrinkDeletion) async -> Void)?
     /// Brings the app up to date and hands back the result, for answering the watch.
     private var currentSnapshot: (() async -> HydrationSnapshot)?
     /// Where to write what the link is doing: the session log, in practice.
@@ -27,9 +29,11 @@ final class PhoneWatchLink: NSObject {
     }
 
     func activate(onDrink: @escaping (PendingDrink) -> Void,
+                  onDeletion: @escaping (DrinkDeletion) async -> Void,
                   currentSnapshot: @escaping () async -> HydrationSnapshot,
                   log: @escaping (String) -> Void) {
         self.onDrink = onDrink
+        self.onDeletion = onDeletion
         self.currentSnapshot = currentSnapshot
         self.log = log
         guard WCSession.isSupported() else { return log("watch: WCSession unsupported") }
@@ -54,7 +58,7 @@ final class PhoneWatchLink: NSObject {
         }
         heldForActivation = nil
         let sent = WatchMessage.decode(HydrationSnapshot.self, from: session.applicationContext, key: WatchMessage.snapshotKey)
-        if !force, sent?.displayFingerprint == snapshot.displayFingerprint {
+        if !force, let sent, snapshot.matchesContent(of: sent) {
             return log?("watch: context unchanged, not re-sent [\(snapshot.summary)]") ?? ()
         }
         let payload = WatchMessage.encode(snapshot, forKey: WatchMessage.snapshotKey)
@@ -159,6 +163,13 @@ extension PhoneWatchLink: WCSessionDelegate {
             }
             return
         }
+        if let deletion = WatchMessage.decode(DrinkDeletion.self, from: userInfo, key: WatchMessage.deletionKey) {
+            Task { @MainActor in
+                self.log?("watch: deletion of \(deletion.drinkID) arrived as userInfo")
+                await self.onDeletion?(deletion)
+            }
+            return
+        }
         guard let drink = WatchMessage.decode(PendingDrink.self, from: userInfo, key: WatchMessage.drinkKey) else { return }
         Task { @MainActor in
             self.log?("watch: drink \(Int(drink.volumeML))mL arrived as userInfo")
@@ -172,11 +183,13 @@ extension PhoneWatchLink: WCSessionDelegate {
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any],
                              replyHandler: @escaping ([String: Any]) -> Void) {
         let drink = WatchMessage.decode(PendingDrink.self, from: message, key: WatchMessage.drinkKey)
+        let deletion = WatchMessage.decode(DrinkDeletion.self, from: message, key: WatchMessage.deletionKey)
         let reply = UncheckedBox(replyHandler)
         let keys = Array(message.keys).sorted()
         Task { @MainActor in
             self.log?("watch: message \(keys) wants a reply")
             if let drink { self.onDrink?(drink) }
+            if let deletion { await self.onDeletion?(deletion) }
             let snapshot = await self.currentSnapshot?() ?? self.latest
             reply.value(snapshot.map { WatchMessage.encode($0, forKey: WatchMessage.snapshotKey) } ?? [:])
             self.log?("watch: replied [\(snapshot?.summary ?? "nothing")]")

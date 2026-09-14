@@ -15,6 +15,7 @@ enum HydrationStore {
     private enum Keys {
         static let snapshot = "shared.snapshot"
         static let pending = "shared.pendingDrinks"
+        static let deletions = "shared.pendingDeletions"
     }
 
     // MARK: - Snapshot
@@ -34,20 +35,40 @@ enum HydrationStore {
         defaults.set(data, forKey: Keys.snapshot)
     }
 
-    /// What to actually draw: the phone's total rolled over at midnight, plus any drinks
-    /// tapped here that the phone hasn't adopted yet.
+    /// What to actually draw: the phone's total rolled over at midnight, less any drinks
+    /// deleted here that the phone hasn't confirmed gone, plus any tapped here that it
+    /// hasn't adopted yet — and the day's list adjusted the same way, so a row and the
+    /// number above it never disagree.
     static func currentSnapshot() -> HydrationSnapshot {
         var snapshot = storedSnapshot()
         if snapshot.isStale {
             snapshot.day = Calendar.current.startOfDay(for: Date())
             snapshot.totalML = 0
             snapshot.lastDrinkDate = nil
+            snapshot.drinks = []
         }
-        let todays = pendingDrinks().filter { Calendar.current.isDateInToday($0.date) }
-        guard !todays.isEmpty else { return snapshot }
-        snapshot.totalML += todays.reduce(0) { $0 + $1.volumeML }
-        let latest = todays.map(\.date).max()
-        snapshot.lastDrinkDate = [snapshot.lastDrinkDate, latest].compactMap { $0 }.max()
+        var drinks = snapshot.drinks ?? []
+        let deleting = Set(pendingDeletions().map(\.drinkID))
+        if !deleting.isEmpty {
+            let removed = drinks.filter { deleting.contains($0.id) }
+            drinks.removeAll { deleting.contains($0.id) }
+            snapshot.totalML = max(snapshot.totalML - removed.reduce(0) { $0 + $1.volumeML }, 0)
+        }
+        // Not one the phone already lists: its acknowledgement is on its way out of the
+        // queue, and a complication run can fall between the two writes.
+        let listed = Set(drinks.map(\.id))
+        let todays = pendingDrinks().filter { Calendar.current.isDateInToday($0.date) && !listed.contains($0.id) }
+        if !todays.isEmpty {
+            snapshot.totalML += todays.reduce(0) { $0 + $1.volumeML }
+            let latest = todays.map(\.date).max()
+            snapshot.lastDrinkDate = [snapshot.lastDrinkDate, latest].compactMap { $0 }.max()
+            drinks += todays.map {
+                HydrationSnapshot.Drink(id: $0.id, date: $0.date, volumeML: $0.volumeML,
+                                        origin: $0.origin == .watch ? .watch : .widget)
+            }
+            drinks.sort { $0.date > $1.date }
+        }
+        snapshot.drinks = drinks
         return snapshot
     }
 
@@ -81,6 +102,36 @@ enum HydrationStore {
         let dropping = Set(ids)
         let remaining = pendingDrinks().filter { !dropping.contains($0.id) }
         replacePending(with: remaining)
+    }
+
+    // MARK: - Pending deletions
+
+    /// Drinks swiped away on the watch that the phone hasn't yet said are gone. Until it
+    /// does they are kept off the list and out of the total here, so the swipe takes
+    /// effect at once even with the phone out of range. Only the watch writes these.
+    static func pendingDeletions() -> [DrinkDeletion] {
+        guard let data = defaults.data(forKey: Keys.deletions),
+              let deletions = try? JSONDecoder().decode([DrinkDeletion].self, from: data)
+        else { return [] }
+        return deletions
+    }
+
+    static func addPendingDeletion(_ deletion: DrinkDeletion) {
+        var deletions = pendingDeletions()
+        deletions.append(deletion)
+        if deletions.count > 100 { deletions.removeFirst(deletions.count - 100) }
+        guard let data = try? JSONEncoder().encode(deletions) else { return }
+        defaults.set(data, forKey: Keys.deletions)
+    }
+
+    /// The phone has answered these requests — by their own ids, not the drinks' — so
+    /// whatever it lists now is the truth, whether the drink went or Health kept it.
+    static func removePendingDeletions(ids: some Collection<UUID>) {
+        guard !ids.isEmpty else { return }
+        let answered = Set(ids)
+        let remaining = pendingDeletions().filter { !answered.contains($0.id) }
+        guard let data = try? JSONEncoder().encode(remaining) else { return }
+        defaults.set(data, forKey: Keys.deletions)
     }
 
     // MARK: - Diagnostics
