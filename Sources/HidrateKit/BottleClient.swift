@@ -127,7 +127,12 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     private var scanIsFiltered: Bool?
     private var proximityTimer: DispatchSourceTimer?
     private var proximityWindow: TimeInterval = 6
-    private var manualRetryInProgress = false
+    /// Peripherals whose pending connect we cancelled ourselves — a retry, or an old
+    /// address let go of when the bottle turned up under a new one — so the callback
+    /// that reports the cancel isn't mistaken for the link dropping. Only ever honoured
+    /// for a connect that never completed: a live session's link dropping is never a
+    /// cancel of ours, whatever was cancelled before it.
+    private var cancelledByUs: Set<UUID> = []
     /// Peripherals let go of on the way to another bottle, so their disconnect callback
     /// isn't mistaken for the link dropping and answered with a reconnect.
     private var abandoned: Set<UUID> = []
@@ -315,7 +320,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
                 // issue a fresh one so a manual retry has a visible effect.
                 let waited = self.connectAttemptStarted.map { Int(Date().timeIntervalSince($0)) } ?? 0
                 self.log(.info, "Cancelling pending connect (waited \(waited)s) and retrying")
-                self.manualRetryInProgress = true
+                self.cancelledByUs.insert(pending.identifier)
                 self.central.cancelPeripheralConnection(pending)
                 self.queue.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.attemptConnection() }
                 return
@@ -343,6 +348,15 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
                 self.central.cancelPeripheralConnection(current)
                 self.peripheral = nil
                 self.state = .disconnected(reason: nil)
+            }
+            if sameBottle, self.wantsConnection,
+               self.sessionActive || self.peripheral?.state == .connecting || self.peripheral?.state == .connected {
+                // Already on it, or a connect is in flight — from restoration, or from a
+                // scan that found the bottle under a fresh address a moment ago. Aiming
+                // again at the address saved last time would only send it back to a
+                // stale one, which at 08:30 on 14 September cost the reconnect 27 seconds.
+                self.log(.debug, "Already \(self.sessionActive ? "connected to" : "connecting to") \(name); leaving it be")
+                return
             }
             self.targetName = name
             self.targetIdentifier = identifier
@@ -390,7 +404,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
             if let pending = self.peripheral, pending.state == .connecting {
                 if pendingFor > 20 {
                     self.log(.info, "Reconnect pending \(Int(pendingFor))s; re-issuing")
-                    self.manualRetryInProgress = true
+                    self.cancelledByUs.insert(pending.identifier)
                     self.central.cancelPeripheralConnection(pending)
                     self.queue.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.attemptConnection() }
                 } else {
@@ -411,10 +425,9 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
     public func disconnect() {
         queue.async {
             self.wantsConnection = false
-            // Not a retry of ours: a flag left over from an identity switch whose cancel
-            // never reported back made the disconnect that followed look like one, and
-            // the callback was swallowed — the page stayed "connected" after the tap.
-            self.manualRetryInProgress = false
+            // Not a cancel of ours: the callback that follows is the disconnect asked for,
+            // and is handled as one.
+            self.cancelledByUs.removeAll()
             self.cancelHandshake()
             if let peripheral = self.peripheral {
                 self.central.cancelPeripheralConnection(peripheral)
@@ -455,7 +468,6 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         }
         state = .connecting
         connectAttemptStarted = Date()
-        manualRetryInProgress = false
         log(.info, "Connecting to \(found.name ?? id.uuidString) [\(id.uuidString.prefix(8))] (peripheral state \(found.state.rawValue))…")
         central.connect(found, options: connectOptions)
         startReconnectScan()
@@ -512,7 +524,7 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
             log(.info, "Found \(name) at \(found.identifier.uuidString.prefix(8)); connecting")
         }
         if let stale = peripheral, stale.identifier != found.identifier, stale.state == .connecting {
-            manualRetryInProgress = true
+            cancelledByUs.insert(stale.identifier)
             central.cancelPeripheralConnection(stale)
         }
         targetIdentifier = found.identifier
@@ -542,8 +554,19 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + interval, repeating: interval)
         timer.setEventHandler { [weak self] in
-            guard let self, let peripheral = self.peripheral, peripheral.state == .connected,
-                  let battery = self.characteristic(HidrateUUID.batteryLevel) else { return }
+            guard let self, let peripheral = self.peripheral else { return }
+            guard peripheral.state == .connected else {
+                // CoreBluetooth's own view of the link, checked once a minute. A session
+                // still marked active on a peripheral no longer connected is a disconnect
+                // that was never reported, or was reported and taken for something else.
+                // Either way the link is gone; recover as if it had just dropped.
+                if self.sessionActive {
+                    self.log(.warning, "The link is gone (peripheral state \(peripheral.state.rawValue)) with no disconnect reported; recovering")
+                    self.handleDisconnect(peripheral, error: nil, isReconnecting: peripheral.state == .connecting)
+                }
+                return
+            }
+            guard let battery = self.characteristic(HidrateUUID.batteryLevel) else { return }
             peripheral.readValue(for: battery)
         }
         timer.resume()
@@ -626,13 +649,25 @@ public final class HidrateBottleClient: NSObject, @unchecked Sendable {
             log(.info, "Let go of \(peripheral.name ?? "the previous bottle")")
             return
         }
-        sessionActive = false
-        if manualRetryInProgress {
+        let ours = cancelledByUs.remove(peripheral.identifier) != nil
+        if let current = self.peripheral, current.identifier != peripheral.identifier {
+            // An address the bottle stopped using, whose pending connect was cancelled
+            // when it turned up under a new one. The session in hand is on the new
+            // address and is not touched. This callback can arrive minutes late, or not
+            // at all; nothing waits on it.
+            log(.debug, "Old address \(peripheral.identifier.uuidString.prefix(8)) let go")
+            return
+        }
+        if ours, !sessionActive {
             // Our own cancel of a pending connect; attemptConnection() is already scheduled.
-            manualRetryInProgress = false
             log(.debug, "Pending connect cancelled")
             return
         }
+        // A live session's link dropping is never a cancel of ours, whatever was cancelled
+        // before it. Taking it for one — a flag left over from an address change once did
+        // — left the page saying "Connected" all night with no link behind it, and no
+        // reconnect ever issued.
+        sessionActive = false
         let reason = Self.describe(error)
         log(error == nil ? .info : .warning, "Disconnected: \(reason)\(isReconnecting ? " (system auto-reconnect pending)" : "")")
         resetSessionState()
@@ -1074,7 +1109,10 @@ extension HidrateBottleClient: CBCentralManagerDelegate {
         sessionActive = false
         let stale = peripheral
         resetSessionState()
-        if let stale { central.cancelPeripheralConnection(stale) }
+        if let stale {
+            cancelledByUs.insert(stale.identifier)
+            central.cancelPeripheralConnection(stale)
+        }
         state = .connecting
         connectAttemptStarted = Date()
         queue.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.attemptConnection() }
@@ -1082,6 +1120,11 @@ extension HidrateBottleClient: CBCentralManagerDelegate {
 
     public func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         if abandoned.remove(peripheral.identifier) != nil { return }
+        cancelledByUs.remove(peripheral.identifier)
+        if let current = self.peripheral, current.identifier != peripheral.identifier {
+            log(.debug, "Connect to old address \(peripheral.identifier.uuidString.prefix(8)) failed; the bottle has moved on")
+            return
+        }
         log(.error, "Connect failed: \(Self.describe(error))")
         state = .disconnected(reason: error?.localizedDescription ?? "connect failed")
         if wantsConnection, _options.autoReconnect {

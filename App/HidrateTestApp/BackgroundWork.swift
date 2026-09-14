@@ -19,6 +19,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // Building it here rather than waiting for the first view means a background
         // launch still re-creates the central manager and activates the watch session.
         let app = AppState.shared
+        // Who launched us matters when reading the log later: a launch in the background
+        // is the system's — CoreBluetooth bringing the bottle back, most likely — and one
+        // in the foreground is a tap on the icon. The Bluetooth key alone never showed up
+        // in sixteen launches, so the state is written beside it.
+        let inBackground = application.applicationState == .background
+        let keys = launchOptions?.keys.map(\.rawValue).sorted().joined(separator: ", ") ?? "none"
+        app.sessionLog.write("launched in the \(inBackground ? "background" : "foreground"), options: \(keys)")
         if launchOptions?[.bluetoothCentrals] != nil {
             app.sessionLog.write("relaunched by CoreBluetooth")
         }
@@ -48,7 +55,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         do {
             try BGTaskScheduler.shared.submit(request)
         } catch {
-            // Not one refresh has run in days of logs; if the ask itself is refused, say so.
+            // Refreshes do run — sixty in three days of logs — but if the ask itself is
+            // refused, say so.
             let reason = "\(error)"
             Task { @MainActor in AppState.shared.sessionLog.write("background refresh not scheduled: \(reason)") }
         }

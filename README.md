@@ -131,6 +131,23 @@ with its `WKApplicationDelegate`: the phone link is listening from launch, so a 
 pushed for the complication is taken in the background instead of waiting for someone to
 open the app.
 
+The link itself is believed only as far as CoreBluetooth confirms it. When the bottle
+turns up under a new address, the pending connect to the old one is cancelled, and the
+callback reporting that cancel can arrive minutes later or never. For a while a flag set
+for the cancel outlived it, and the next real disconnect of the live session was taken for
+the cancel and swallowed: no reconnect issued, and the page saying "Connected" all night
+with nothing behind it, which is what 21:58 to 06:13 on the night of 13 September looked
+like. A cancel is now remembered by the address it was for and only ever honoured for a
+connect that never completed; a live session's link dropping is handled as one however it
+is reported. Once a minute, alongside the keep-alive, the client also checks
+CoreBluetooth's own view of the peripheral, and a session still marked active on one that
+is no longer connected is recovered as if the link had just dropped. A relaunch no longer
+re-aims the connect at the address saved last time when a scan has already found the
+bottle under a fresh one, either, which cost one reconnect 27 seconds. And every launch
+writes whether it began in the foreground — someone tapped the icon — or the background,
+which is the system's doing, so the log can say whether CoreBluetooth is relaunching the
+app for the bottle at all.
+
 The widget's timeline asks to be woken hourly and exactly at midnight — midnight so it
 never shows yesterday's number, hourly as a safety net for a day when the app never runs.
 
