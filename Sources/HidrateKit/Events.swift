@@ -157,10 +157,14 @@ public struct SettledReading: Sendable, Hashable {
     /// What the drink measured before being cut down to what the bottle was believed to
     /// hold, when it was.
     public var cappedFromML: Double?
+    /// How long the bottle was out of sight or in a hand between the resting reading a
+    /// drink was measured against and this one, when it was measured across such a
+    /// stretch. Nil for a drink watched between readings seconds apart.
+    public var acrossGapSeconds: TimeInterval?
 
     public init(date: Date, raw: Int, levelML: Double, baselineBeforeML: Double?,
                 change: LevelChange?, plausible: Bool, isFirstOfSession: Bool,
-                cappedFromML: Double? = nil) {
+                cappedFromML: Double? = nil, acrossGapSeconds: TimeInterval? = nil) {
         self.date = date
         self.raw = raw
         self.levelML = levelML
@@ -169,18 +173,20 @@ public struct SettledReading: Sendable, Hashable {
         self.plausible = plausible
         self.isFirstOfSession = isFirstOfSession
         self.cappedFromML = cappedFromML
+        self.acrossGapSeconds = acrossGapSeconds
     }
 
     /// One line for the session log. Only worth writing when something notable happened
     /// or could have: the rest are two-second heartbeats.
     public var logLine: String? {
         guard isFirstOfSession || baselineBeforeML == nil || !plausible
-                || change?.isHandled == true || cappedFromML != nil else { return nil }
+                || change?.isHandled == true || cappedFromML != nil || acrossGapSeconds != nil else { return nil }
         let baseline = baselineBeforeML.map { String(Int($0.rounded())) } ?? "none"
         let outcome = change.map { String(describing: $0) } ?? "no change"
         var line = "settled raw=\(raw) level=\(Int(levelML.rounded()))mL baseline=\(baseline) → \(outcome)"
         if !plausible { line += " [below empty]" }
         if let cappedFromML { line += " [measured \(Int(cappedFromML.rounded()))mL; only what the bottle held]" }
+        if let acrossGapSeconds { line += " [across \(Int((acrossGapSeconds / 60).rounded())) min]" }
         if isFirstOfSession { line += " [first of session]" }
         return line
     }

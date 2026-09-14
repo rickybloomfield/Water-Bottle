@@ -160,7 +160,7 @@ struct DrinkDetailView: View {
                 if entry.source == .emptied {
                     Text("What the app believed was still in the bottle when you marked it empty.")
                 } else if entry.approximate {
-                    Text("Reconstructed after the bottle reconnected, so the amount is approximate and the time is the middle of the gap.")
+                    Text("Measured when the bottle came back to rest after being out of range or carried around, so the amount is what left the scale less the drift it could have picked up meanwhile, and the time is the middle of that gap. If the bottle was poured out rather than drunk, delete this.")
                 } else if entry.healthKitUUID != nil, isEditable {
                     Text("Health can't change a sample once written, so saving removes the old one and writes a new one.")
                 }

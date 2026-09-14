@@ -35,6 +35,9 @@ struct DebugView: View {
                 Stepper(value: config.confirmSeconds, in: 15...300, step: 15) {
                     LabeledContent("Hold it for", value: "\(Int(config.wrappedValue.confirmSeconds))s")
                 }
+                Stepper(value: config.gapDriftMaxMLPerMinute, in: 0.5...10, step: 0.5) {
+                    LabeledContent("Drift allowed while away", value: String(format: "%.1f mL/min", config.wrappedValue.gapDriftMaxMLPerMinute))
+                }
                 Stepper(value: Binding(get: { app.model.stabilitySamples }, set: { app.model.stabilitySamples = $0 }), in: 1...10) {
                     LabeledContent("Stable samples", value: "\(app.model.stabilitySamples)")
                 }

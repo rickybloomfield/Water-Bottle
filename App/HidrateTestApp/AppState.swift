@@ -682,11 +682,15 @@ final class AppState {
     }
 
     private func handle(_ event: LevelChangeEvent) {
-        sessionLog.write("levelChange \(event.change) raw=\(event.stableRaw)")
+        let across = event.acrossGapSeconds.map { " across \(Int(($0 / 60).rounded())) min" } ?? ""
+        sessionLog.write("levelChange \(event.change) raw=\(event.stableRaw)\(across)")
         guard intakeSource == .weight, case .drink(let volume, let from, let to) = event.change else { return }
+        // Measured across a gap, the amount is the drop less the drift the zero was
+        // allowed, and the time is the middle of the gap: an estimate, and shown as one.
         let entry = IntakeEntry(
             id: event.id, date: event.date, volumeML: volume.rounded(), source: .weight,
-            rawBefore: Int(from.rounded()), rawAfter: Int(to.rounded())
+            rawBefore: Int(from.rounded()), rawAfter: Int(to.rounded()),
+            approximate: event.acrossGapSeconds != nil
         )
         add(entry)
     }

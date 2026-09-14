@@ -8,6 +8,10 @@ public struct LevelChangeEvent: Sendable, Identifiable, Hashable {
     public let date: Date
     public let change: LevelChange
     public let stableRaw: Int
+    /// For a drink measured across a gap — the bottle out of sight or in a hand between
+    /// the two resting readings — how long that gap was. Nil for one watched between
+    /// readings seconds apart. `date` is then the middle of the gap.
+    public let acrossGapSeconds: TimeInterval?
 
     public var volumeML: Double { change.volumeML }
     public var isDrink: Bool { change.isDrink }
@@ -168,8 +172,8 @@ public final class HidrateBottleModel {
         // must not throw away the level the tracker is measuring against.
         storedCalibration = calibration.rezeroed(toEmptyRaw: emptyRaw, at: now)
         store?.saveCalibration(storedCalibration)
-        // The level is known outright, so everything restarts from it.
-        tracker.reset(baselineML: level)
+        // The level is known outright, so everything restarts from it, as of now.
+        tracker.reset(baselineML: level, lastReadingAt: now)
         store?.saveBaselineML(level)
         store?.saveLastLevel(level, date: now)
         rememberedRaw = raw
@@ -582,7 +586,10 @@ public final class HidrateBottleModel {
         // A drop held back until it proved itself belongs at the moment it happened, not
         // at the reading a minute later that confirmed it.
         let heldSince = tracker.heldDrinkSince
+        // A drop past what the bottle holds is the bottle off its sensor, not a drink.
+        tracker.believedContentsML = believedLevelML
         var change = tracker.ingest(levelML: levelML, at: date)
+        let acrossGapSince = tracker.lastDrinkAcrossGapSince
         // Only what the bottle held can have left it — a bottleful at the very most. A
         // drop past that is the zero sinking, or a hand taking some of the weight off the
         // sensor, and neither is water; a bottle believed empty has nothing to give.
@@ -595,13 +602,23 @@ public final class HidrateBottleModel {
                 change = capped
             }
         }
-        let happenedAt = change?.isDrink == true ? (heldSince ?? date) : date
+        // When the drop was first seen. A drink measured across a gap — the bottle out of
+        // range for a workout, or carried around in a hand — happened somewhere inside
+        // it, and is dated to the middle.
+        let seenAt = heldSince ?? date
+        let acrossGapSeconds = acrossGapSince.map { seenAt.timeIntervalSince($0) }
+        let happenedAt: Date
+        if change?.isDrink == true, let since = acrossGapSince {
+            happenedAt = since.addingTimeInterval(seenAt.timeIntervalSince(since) / 2)
+        } else {
+            happenedAt = change?.isDrink == true ? seenAt : date
+        }
         let wasFirst = awaitingFirstSettledReading
         awaitingFirstSettledReading = false
         onSettledReading?(SettledReading(
             date: date, raw: raw, levelML: levelML, baselineBeforeML: baselineBefore,
             change: change, plausible: plausible, isFirstOfSession: wasFirst,
-            cappedFromML: cappedFromML
+            cappedFromML: cappedFromML, acrossGapSeconds: acrossGapSeconds
         ))
 
         // Saved whatever the reading says, below empty or not: a relaunch has to pick the
@@ -610,13 +627,16 @@ public final class HidrateBottleModel {
         rememberedRaw = raw
         store?.saveLastRaw(raw, date: date)
         store?.saveBaselineML(tracker.baselineML)
-        store?.saveLastLevel(tracker.baselineML ?? levelML, date: date)
+        // Dated to when the baseline was last followed, not to this reading: a relaunch
+        // judges its first reading over the gap since the bottle was last seen at rest.
+        store?.saveLastLevel(tracker.baselineML ?? levelML, date: tracker.baselineAt ?? date)
         store?.saveCreepMLPerSecond(creep.mlPerSecond)
 
         applyToBelievedLevel(change, measuredLevelML: levelML, at: date)
 
         guard let change, !change.isBaseline, !change.isHandled else { return }
-        let event = LevelChangeEvent(id: UUID(), date: happenedAt, change: change, stableRaw: raw)
+        let event = LevelChangeEvent(id: UUID(), date: happenedAt, change: change, stableRaw: raw,
+                                     acrossGapSeconds: acrossGapSeconds)
         levelChanges.insert(event, at: 0)
         onLevelChange?(event)
     }

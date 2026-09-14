@@ -138,41 +138,65 @@ struct LevelTrackerTests {
     }
 
     /// A new connection is a gap however recent the last reading was: the first reading
-    /// of a session is where the bottle sits, not a step from the one before.
-    @Test func aNewSessionStartsFromWhereTheBottleSits() {
+    /// of a session is judged against where the bottle last rested, over the time since.
+    /// Half a minute after resting at 402, a bottle at −207 is 609 mL down — held the
+    /// minute any big drop is, then logged. The model cuts it to what the bottle held,
+    /// 402 at most, and dates it to the middle of the gap.
+    @Test func aNewSessionMeasuresFromWhereTheBottleLastRested() {
         var t = tracker()
         _ = t.ingest(levelML: 402, at: t0)
         t.sessionStarted()
-        #expect(t.ingest(levelML: -207, at: t0 + 30) == nil)
+        #expect(t.ingest(levelML: -207, at: t0 + 30) == nil, "held")
+        #expect(t.baselineML == 402, "the baseline waits for the drop to prove itself")
+        guard case .drink(let volume, let from, let to)? = t.ingest(levelML: -207, at: t0 + 95) else {
+            Issue.record("expected a drink")
+            return
+        }
+        #expect(from == 402 && to == -207)
+        // 609, less the half-millilitre the zero typically manages in half a minute.
+        #expect(abs(volume - 608.75) < 0.01, "logged \(volume)")
+        #expect(t.lastDrinkAcrossGapSince == t0, "measured across the gap since the bottle rested at 402")
         #expect(t.baselineML == -207)
     }
 
     /// 07:36 on 7 September: home after an hour away, the phone reconnected and the
     /// session's first reading was of the bottle in a hand, 1293 mL under the 710 it had
     /// rested at. Set back down half a minute later it read 551 — re-seated, and an hour
-    /// of drift — with nothing drunk. The baseline from before the gap is not measured
-    /// against: the bottle is adopted where it rests, and nothing is logged.
-    @Test func aSessionThatOpensWithTheBottleInHandAdoptsWhereItRests() {
+    /// of drift — with nothing drunk. The bottle in a hand is not a reading; where it
+    /// rests is measured against the 710 over the whole hour, and 159 mL is within what
+    /// the zero is allowed in that time, so the baseline follows it and nothing is logged.
+    @Test func aSessionThatOpensWithTheBottleInHandMeasuresWhereItRests() {
         var t = tracker()
         _ = t.ingest(levelML: 710, at: t0)
         t.sessionStarted()
-        #expect(t.ingest(levelML: -583, at: t0 + 20)?.isHandled == true)
+        let back = t0 + 3600
+        #expect(t.ingest(levelML: -583, at: back)?.isHandled == true)
         #expect(t.baselineML == 710, "held: the bottle is in the air")
-        #expect(t.ingest(levelML: -580, at: t0 + 40)?.isHandled == true)
-        #expect(t.ingest(levelML: 551, at: t0 + 55) == nil, "not a drink: the 710 was before the gap")
+        #expect(t.ingest(levelML: -580, at: back + 20)?.isHandled == true)
+        #expect(t.ingest(levelML: 551, at: back + 35) == nil, "an hour's drift, not a drink")
         #expect(t.baselineML == 551)
         // From here on the app is watching: the next drop is a drink.
-        #expect(t.ingest(levelML: 500, at: t0 + 70) == .drink(volumeML: 51, fromML: 551, toML: 500))
+        #expect(t.ingest(levelML: 500, at: back + 50) == .drink(volumeML: 51, fromML: 551, toML: 500))
     }
 
-    /// The same lift, but the bottle never comes back: emptied and left off its sensor,
-    /// or washed. After a minute where it sits is the new baseline, nothing logged.
-    @Test func aLiftAtSessionStartThatStaysBecomesTheBaseline() {
+    /// The same lift, but the bottle never comes back down: carried off, or left off its
+    /// sensor. A reading off the sensor is never adopted, however long it stays, so the
+    /// baseline holds at the last rest, and wherever the bottle next rests is measured
+    /// against it over the whole stretch — here a bottleful drunk on the way.
+    @Test func aLiftThatStaysHoldsTheBaselineUntilTheBottleRests() {
         var t = tracker()
         _ = t.ingest(levelML: 710, at: t0)
         t.sessionStarted()
         for i in 0..<5 { #expect(t.ingest(levelML: -583, at: t0 + 20 + Double(i) * 15)?.isHandled == true) }
-        #expect(t.baselineML == -583, "it stayed")
+        #expect(t.baselineML == 710, "never adopted")
+        // Set down empty ten minutes later: 710 down, less the 5 mL ten minutes allows
+        // the zero, is a bottleful — held, then logged.
+        #expect(t.ingest(levelML: 0, at: t0 + 600) == nil, "held")
+        guard case .drink(let volume, _, _)? = t.ingest(levelML: 0, at: t0 + 665) else {
+            Issue.record("expected a drink")
+            return
+        }
+        #expect(abs(volume - 705) < 0.01, "logged \(volume)")
     }
 
     /// The zero wanders up as readily as down while the bottle sleeps. Adopting only
@@ -555,17 +579,22 @@ struct HandlingTests {
         #expect(t.ingest(levelML: 500, at: t0 + 15) == .drink(volumeML: 100, fromML: 600, toML: 500))
     }
 
-    /// A drop across a gap is never a drink. Within a bottleful of the baseline the bottle
-    /// is simply adopted where it now reads; further below than the bottle could have
-    /// given, it is in a hand or off its sensor, and the baseline waits a minute to see
-    /// whether it comes back before following it there.
-    @Test func aGapIsNotAStep() {
+    /// A drop across a gap is measured, less what the zero is allowed for the time. An
+    /// hour away and 800 mL down from 700 — emptied, and the zero sunk 100 — is most of
+    /// a bottle: held the minute any big drop is, then logged less the 30 mL the zero
+    /// typically wanders in an hour. The model then cuts it to what the bottle held.
+    @Test func aDropAcrossAGapIsMeasuredLessTheDrift() {
         var t = tracker()
         _ = t.ingest(levelML: 700, at: t0)
-        #expect(t.ingest(levelML: -100, at: t0 + 3600)?.isHandled == true)
+        #expect(t.ingest(levelML: -100, at: t0 + 3600) == nil, "held")
         #expect(t.baselineML == 700, "held")
-        #expect(t.ingest(levelML: -101, at: t0 + 3600 + 61)?.isHandled == true)
-        #expect(t.baselineML == -101, "it stayed: adopted, nothing logged")
+        guard case .drink(let volume, let from, let to)? = t.ingest(levelML: -101, at: t0 + 3600 + 61) else {
+            Issue.record("expected a drink")
+            return
+        }
+        #expect(from == 700 && to == -101)
+        #expect(abs(volume - (801 - 30)) < 0.01, "logged \(volume)")
+        #expect(t.baselineML == -101)
     }
 
     /// Filling a dry bottle to the brim is the largest change water can make, and has to
@@ -629,24 +658,29 @@ struct WashingTests {
 
     func tracker() -> LevelTracker { LevelTracker(capacityML: 621) }
 
-    /// 16:34:58: resting at 1521 mL before the wash, the emptied bottle read 822 and sat
-    /// there, creeping, for the best part of a minute. Then a gap, and 513 at 16:42:50.
-    /// Every one of those readings is further below 1521 than the bottle could have
-    /// given, so each is the bottle being handled, and the baseline waits; once it has
-    /// stayed for a minute, where it sits is the new baseline. Nothing is a drink.
-    @Test func anEmptiedBottleBecomesTheNewBaseline() {
+    /// 16:34:58: resting at 1521 mL a quarter of an hour before, the emptied bottle read
+    /// 822 — held, since emptying a bottle into a sink reads exactly like drinking it —
+    /// and sat there creeping for the best part of a minute; then a gap, and 513 at
+    /// 16:42:50, which is 1008 under the baseline: more than the bottle could have lost,
+    /// so it is off its sensor, or the zero has moved for good. The held drop is dropped
+    /// and the baseline holds. Half an hour of that and the baseline is forgotten, so the
+    /// next resting reading starts afresh with nothing logged.
+    @Test func anEmptiedBottleReadingFurtherThanItHeldIsOffItsSensor() {
         var t = tracker()
-        t.reset(baselineML: 1521)
-        var changes: [LevelChange?] = []
-        changes.append(t.ingest(levelML: 822, at: t0))
+        t.reset(baselineML: 1521, lastReadingAt: t0 - 900)
+        #expect(t.ingest(levelML: 822, at: t0) == nil, "held")
         #expect(t.baselineML == 1521, "held: the bottle could still be set back down")
         for step in 1...20 {
-            changes.append(t.ingest(levelML: 814 - Double(step) * 1.4, at: t0 + 9 + Double(step) * 2))
+            #expect(t.ingest(levelML: 814 - Double(step) * 1.4, at: t0 + 9 + Double(step) * 2) == nil, "still held")
         }
-        #expect(changes.allSatisfy { $0?.isDrink != true }, "nothing here was drunk: \(changes.compactMap { $0 })")
         let later = t.ingest(levelML: 513, at: t0 + 472)
-        #expect(later?.isHandled == true, "seven minutes on: \(String(describing: later))")
-        #expect(t.baselineML == 513, "it stayed: the empty bottle is the new baseline")
+        #expect(later?.isHandled == true, "1008 under 1521 is more than the bottle held: \(String(describing: later))")
+        #expect(t.baselineML == 1521, "held, not adopted")
+        // Still there half an hour on: the baseline is forgotten, and the reading after
+        // that is where measuring starts again.
+        #expect(t.ingest(levelML: 500, at: t0 + 472 + 1800)?.isHandled == true)
+        #expect(t.baselineML == nil)
+        #expect(t.ingest(levelML: 499, at: t0 + 472 + 1815) == .baseline(levelML: 499))
     }
 
     /// The same thing seen the other way: a drop held as a possible drink that then goes
@@ -661,13 +695,14 @@ struct WashingTests {
     }
 
     /// Picking the bottle up still works as before: a lift and a set-down within seconds
-    /// leave the baseline where it was, with nothing logged.
+    /// log nothing, and the two millilitres the surface reads differently are drift the
+    /// baseline follows.
     @Test func aLiftThatComesBackIsStillNothing() {
         var t = tracker()
         _ = t.ingest(levelML: 500, at: t0)
         #expect(t.ingest(levelML: -200, at: t0 + 15)?.isHandled == true)
         #expect(t.ingest(levelML: 502, at: t0 + 30) == nil)
-        #expect(t.baselineML == 500)
+        #expect(t.baselineML == 502)
     }
 
     /// 16:43 to 16:50: the re-seated load cell sank at about 0.65 mL a second. Handling
@@ -747,6 +782,190 @@ struct WashingTests {
             return
         }
         #expect(abs(volume - 100) < 0.01, "logged \(volume)")
+    }
+}
+
+/// The morning of 14 September 2026: the bottle filled and marked Full at 07:55, drunk
+/// empty during a workout with the phone out of range from 08:01 to 08:30, and 4.9 oz
+/// logged — because nothing across a gap was measured, and the app still believed the
+/// bottle full when it came back. Levels are as the calibration read them, with the
+/// zero set by Full (1.418 raw/mL).
+@Suite("Measuring across a gap")
+struct GapTests {
+    /// 08:00:57, the last resting reading before the gap.
+    let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    func tracker() -> LevelTracker { LevelTracker(capacityML: 621) }
+
+    /// At rest reading 641 (the zero had crept up 20 since Full). 08:30:56, a new
+    /// connection: −771, in a hand. 08:31:04 set down empty at −123, and there it stayed.
+    /// That is the whole bottle, drunk while nobody was watching.
+    @Test func aBottleDrunkEmptyWhileOutOfRangeIsLoggedWhenItComesBack() {
+        var t = tracker()
+        t.believedContentsML = 621
+        _ = t.ingest(levelML: 641, at: t0)
+        t.sessionStarted()
+        let back = t0 + 30 * 60
+        #expect(t.ingest(levelML: -771, at: back)?.isHandled == true, "in a hand")
+        #expect(t.ingest(levelML: -123, at: back + 8) == nil, "at rest, 764 down: held")
+        #expect(t.baselineML == 641)
+        for i in 1...20 { #expect(t.ingest(levelML: -124, at: back + 8 + Double(i) * 2) == nil) }
+        guard case .drink(let volume, let from, let to)? = t.ingest(levelML: -122, at: back + 70) else {
+            Issue.record("expected the workout's drink")
+            return
+        }
+        #expect(from == 641 && to == -122)
+        // 763 down, less the 15 mL the zero typically manages in half an hour: more than
+        // the bottle held, which the model cuts to a bottleful.
+        #expect(abs(volume - (763 - 15)) < 0.5, "logged \(volume)")
+        #expect(t.lastDrinkAcrossGapSince == t0)
+        #expect(HidrateBottleModel.drink(.drink(volumeML: volume, fromML: from, toML: to), cappedAt: 621, minDrinkML: 15)
+                == .drink(volumeML: 621, fromML: from, toML: to))
+    }
+
+    /// 08:36:54 the same morning: the empty bottle lifted and set down again 144 mL lower
+    /// — a different spot on the desk, or the last mouthful. Watched, that is a drink by
+    /// the scale; the model, believing the bottle empty, logs nothing.
+    @Test func anEmptyBottleSetDownLowerGivesNothing() {
+        let step = LevelChange.drink(volumeML: 144, fromML: -121, toML: -265)
+        #expect(HidrateBottleModel.drink(step, cappedAt: 0, minDrinkML: 15) == nil)
+    }
+
+    /// The night of 6 September, when the bottle slept for an hour at a stretch and the
+    /// zero slid 20 to 75 mL between wakes: 74 mL over 64 minutes, 25 over 59, 21 over
+    /// 33, 30 over 50 — four "drinks" from a bottle nobody touched, and none of them
+    /// clears the allowance for the time.
+    @Test func theZeroSlidingWhileTheBottleSleepsIsNotADrink() {
+        var t = tracker()
+        _ = t.ingest(levelML: 328, at: t0)
+        var now = t0
+        for (drop, minutes) in [(74.0, 64.0), (25.0, 59.0), (21.0, 33.0), (30.0, 50.0)] {
+            let before = t.baselineML!
+            now += minutes * 60
+            #expect(t.ingest(levelML: before - drop, at: now) == nil, "\(drop) mL over \(minutes) min")
+            #expect(t.baselineML == before - drop, "the baseline follows the slide")
+        }
+    }
+
+    /// 09:26 on 11 September: resting at 824 after a fill, the bottle came back 25
+    /// minutes later reading 62, and the person had to mark it empty by hand. That is a
+    /// bottleful, drunk in the gap.
+    @Test func aBottlefulAcrossHalfAnHourIsADrink() {
+        var t = tracker()
+        t.believedContentsML = 621
+        _ = t.ingest(levelML: 824, at: t0)
+        t.sessionStarted()
+        #expect(t.ingest(levelML: 62, at: t0 + 25 * 60) == nil, "held")
+        guard case .drink(let volume, _, _)? = t.ingest(levelML: 62, at: t0 + 25 * 60 + 60) else {
+            Issue.record("expected a drink")
+            return
+        }
+        #expect(abs(volume - (762 - 12.5)) < 0.01, "logged \(volume)")
+    }
+
+    /// A bottle carried around for three minutes and set back down with a sip taken on
+    /// the way: the readings in the hand are not readings, and the sip is measured from
+    /// where the bottle last rested, over the whole stretch — less the drift three
+    /// minutes allows the zero.
+    @Test func aSipWhileCarriedIsMeasuredWhenTheBottleIsSetDown() {
+        var t = tracker()
+        _ = t.ingest(levelML: 400, at: t0)
+        for i in 1...11 { #expect(t.ingest(levelML: -500, at: t0 + Double(i) * 15)?.isHandled == true) }
+        #expect(t.baselineML == 400, "never adopted")
+        guard case .drink(let volume, let from, _)? = t.ingest(levelML: 320, at: t0 + 180) else {
+            Issue.record("expected a drink")
+            return
+        }
+        #expect(from == 400)
+        #expect(abs(volume - 78.5) < 0.01, "logged \(volume)")
+        #expect(t.lastDrinkAcrossGapSince == t0)
+    }
+
+    /// The same carry with nothing drunk: set down where it was, nothing is logged.
+    @Test func aCarryWithNothingDrunkLogsNothing() {
+        var t = tracker()
+        _ = t.ingest(levelML: 400, at: t0)
+        for i in 1...11 { _ = t.ingest(levelML: -500, at: t0 + Double(i) * 15) }
+        #expect(t.ingest(levelML: 398, at: t0 + 180) == nil)
+        #expect(t.baselineML == 398)
+    }
+
+    /// A bottle believed to hold 100 mL, and a reading 700 mL under the baseline: that is
+    /// not a drink from a bottle with 100 in it, whatever the scale says — it is the
+    /// bottle off its sensor, however plausible the level itself looks.
+    @Test func aDropPastWhatTheBottleHeldIsTheBottleOffItsSensor() {
+        var t = tracker()
+        t.believedContentsML = 100
+        _ = t.ingest(levelML: 600, at: t0)
+        t.sessionStarted()
+        #expect(t.ingest(levelML: -100, at: t0 + 600)?.isHandled == true)
+        #expect(t.baselineML == 600)
+    }
+
+    /// The first reading the tracker ever sees can be of the bottle in a hand — it woke
+    /// and connected because it was picked up. That is no baseline.
+    @Test func aFirstReadingInAHandIsNoBaseline() {
+        var t = tracker()
+        #expect(t.ingest(levelML: -600, at: t0)?.isHandled == true)
+        #expect(t.baselineML == nil)
+        #expect(t.ingest(levelML: 500, at: t0 + 20) == .baseline(levelML: 500))
+    }
+
+    /// 8 September: the zero a litre stale, every resting reading of the day under the
+    /// floor. Restored beside a baseline taken the same way, those readings are still
+    /// measured against one another — a drink is a difference — and a lift, another
+    /// 500 under, is still a lift.
+    @Test func aStaleZeroStillMeasuresDifferences() {
+        var t = tracker()
+        t.reset(baselineML: -1000, lastReadingAt: t0)
+        #expect(t.ingest(levelML: -1010, at: t0 + 15) == nil, "drift")
+        #expect(t.ingest(levelML: -1300, at: t0 + 30) == .drink(volumeML: 290, fromML: -1010, toML: -1300))
+        #expect(t.ingest(levelML: -1800, at: t0 + 45)?.isHandled == true, "a lift")
+        #expect(t.baselineML == -1300)
+    }
+
+    /// With no baseline and every reading under the floor, half an hour of them is where
+    /// the bottle rests, floor or no floor. Set down properly later — 800 mL up in a
+    /// step — it is simply back on its sensor, not refilled.
+    @Test func halfAnHourUnderTheFloorWithNoBaselineIsWhereTheBottleRests() {
+        var t = tracker()
+        for i in 0..<120 { #expect(t.ingest(levelML: -700, at: t0 + Double(i) * 15)?.isHandled == true) }
+        #expect(t.baselineML == nil)
+        #expect(t.ingest(levelML: -700, at: t0 + 1800) == .baseline(levelML: -700))
+        #expect(t.ingest(levelML: -705, at: t0 + 1815) == nil, "drift, measured from there")
+        #expect(t.ingest(levelML: 100, at: t0 + 1830) == .baseline(levelML: 100), "back on the sensor")
+        #expect(t.ingest(levelML: 60, at: t0 + 1845) == .drink(volumeML: 40, fromML: 100, toML: 60))
+    }
+
+    /// Restored from disk with the time the baseline was last followed, a relaunch's
+    /// first reading is judged over the gap since — and so is the drink in it.
+    @Test func aRelaunchMeasuresOverTheGapSinceTheBaseline() {
+        var t = tracker()
+        t.reset(baselineML: 500, lastReadingAt: t0)
+        guard case .drink(let volume, _, _)? = t.ingest(levelML: 300, at: t0 + 20 * 60) else {
+            Issue.record("expected a drink")
+            return
+        }
+        #expect(abs(volume - (200 - 10)) < 0.01, "logged \(volume)")
+    }
+
+    /// A drop held across a gap survives the link dropping again: the baseline it fell
+    /// from stands, and the next resting reading measures it over the whole stretch.
+    @Test func aHeldDropSurvivesTheLinkDropping() {
+        var t = tracker()
+        _ = t.ingest(levelML: 600, at: t0)
+        t.sessionStarted()
+        #expect(t.ingest(levelML: 50, at: t0 + 600) == nil, "held")
+        t.forgetHeldDrink()
+        t.sessionStarted()
+        #expect(t.ingest(levelML: 48, at: t0 + 900) == nil, "held again, from the same 600")
+        #expect(t.baselineML == 600)
+        guard case .drink(let volume, let from, _)? = t.ingest(levelML: 48, at: t0 + 965) else {
+            Issue.record("expected a drink")
+            return
+        }
+        #expect(from == 600)
+        #expect(abs(volume - (552 - 7.5)) < 0.01, "logged once, less a quarter-hour's drift: \(volume)")
     }
 }
 

@@ -214,21 +214,24 @@ So the app stops treating a full calibration as the fix for drift:
 * **A drink is at most what the bottle held.** The believed level caps every drink. A
   drop past it is the zero sinking, or a hand taking some of the weight off the sensor,
   and a bottle believed empty has nothing to give.
-* **A drink is a drop the app watched happen.** Only readings that follow on from one
-  another, seconds apart in one connection, can measure one. Across a gap — the bottle
-  asleep, the app relaunched, a reconnect — nothing is measured: the reading the bottle
-  comes back at becomes the baseline, up or down, and only a refill is reported. If it
-  comes back in a hand, as it often does when it was picked up and woke, the baseline
-  waits until it rests and adopts that; the level from before the gap is never measured
-  against, since a bottle set down after an hour away read 160 mL lighter with nothing
-  drunk. The
-  bottle sleeps for an hour at a stretch overnight, and a slow slide that is absorbed a
-  millilitre at a time while connected arrives as one 20–75 mL step when it wakes; a
-  bottle nobody touched logged four drinks that way in one night. The price is that a
-  drink taken while the bottle is away isn't measured either. The level the app carries
-  still holds that water, so it is what Empty offers to log when the bottle is next
-  emptied — and a missed drink is visible and can be added, where an invented one has
-  already been written to Apple Health.
+* **A drink is a drop between two resting readings, less what the zero could have done
+  in between.** Seconds apart in one connection, that is one interval of creep, and the
+  drop is logged as it is. Across a gap — the bottle out of range for a workout, asleep
+  for an hour, carried around in a hand, the app relaunched — the zero may have
+  wandered, so the drop has to clear an allowance that grows with the gap, 20 mL plus
+  2.5 mL a minute, and what is logged is the drop less what the zero typically manages,
+  half a millilitre a minute. Half an hour away is a 95 mL allowance: a bottle drunk
+  empty during a workout is logged when it comes back — on 14 September, with the phone
+  out of range from 08:01 to 08:30, it had been 4.9 oz and a manual Empty — while the
+  20–75 mL the zero slides during an hour's sleep is not, which is what once logged
+  four drinks in a night from a bottle nobody touched. Over a whole night the allowance
+  grows past anything the bottle holds and nothing is measured at all. Where the two
+  resting readings were seconds apart the drink is exact; across a gap it is marked as
+  an estimate, dated to the middle of the gap, and can be corrected. Pouring the bottle
+  out reads exactly like drinking it, so a wash logs a drink of what the bottle held;
+  that row is there to delete. The level the app carries is still the backstop: it caps
+  every drink at what was in the bottle, and it is what Empty offers to log if a drink
+  was missed all the same.
 
 The zero also creeps *upward*, so the scale can read more than the bottle holds. The
 bottle's page says so and points at the fix: Full, if it is, or Empty once it is.
@@ -240,19 +243,30 @@ have moved to **Settings → Debug → Calibration**.
 
 ## Picking the bottle up
 
-Nothing the water does can move more of it than the bottle holds, so a reading that moves
-further than that between two readings taken seconds apart is the bottle itself being
-picked up or set down. The tracker calls that *handled*: no drink, no refill, and the
-baseline is held where it was so that setting the bottle back down is a change of nothing.
+The bottle in a hand, on its side, or with the puck out of it reads about its own weight
+under empty — some 500 mL on the 21 oz — whatever it holds, and setting it back down is a
+change of nothing. The tracker calls such a reading *handled*: no drink, no refill, the
+baseline held where the bottle last rested, and nothing measured until it rests again.
+Three tests catch one, and any of them is enough. The reading sits further under empty
+than a sunk zero could put a resting bottle (450 mL). It sits further under the baseline
+than the bottle's contents and a margin for the zero sinking could account for (what the
+app believes is in it, plus 350 mL) — which is what tells a lifted bottle from an emptied
+one, since an emptied bottle can only have lost what it held. Or, between readings seconds
+apart, it moved more than the bottle holds, which water cannot do in seconds.
 
-That one rule is the whole of it for a full bottle, whose lift displaces more than a
-bottleful. A nearly empty one displaces less and lands far below empty, and what keeps
-that from being a drink is that a nearly empty bottle has almost nothing to give: a drink
-is capped at what the bottle held. What falls between the two is a drop of half a bottle or so
+A reading off the sensor is never adopted as the baseline, however long the bottle stays
+in the hand. It used to be, after a minute, and a bottle carried off and drunk from on the
+way then had its drink measured from nowhere; now the baseline holds at the last rest, and
+wherever the bottle next comes to rest is measured against it over the whole stretch, with
+the gap's allowance for drift. Half an hour of such readings, though, is not a hand: the
+zero has moved for good — the puck re-seated after a wash, most likely — and the baseline
+is forgotten, so that the next resting reading starts afresh with nothing logged.
+
+What falls between "off the sensor" and "an ordinary sip" is a drop of half a bottle or so
 that still looks plausible — and those are held back and only logged once they have stayed
 down for a minute. A bottle that was only carried comes back long before that; water that
-was drunk never does. Ordinary sips are logged the moment they are seen, as before: it is
-only drops past half the bottle that wait, and they are rare.
+was drunk never does. Ordinary sips are logged the moment they are seen: it is only drops
+past half the bottle that wait, and they are rare.
 
 The one thing that shape cannot separate is drinking half the bottle and refilling it to
 the same level inside that minute, which is a lift as far as the scale is concerned; that
@@ -354,8 +368,14 @@ the bottle was away, from the level saved before the disconnect: its drift corre
 assumed the resting reading falls 15 mL a minute, which over the bottle's usual
 quarter-hour disconnect subtracted 225 mL from any observed drop and corrected the
 drink out of existence; corrected to 3 mL a minute it then logged the zero's overnight
-slide as drinks instead. That whole path is gone — see "Calibration" above: a drink is a
-drop the app watched happen, and nothing across a gap is measured.
+slide as drinks instead. For a week after that nothing across a gap was measured at all,
+which was the other extreme: the bottle is out of the phone's sight for most of the day —
+it changes its address every quarter of an hour, the link times out whenever a wall is in
+the way, and it sleeps — so most drinking happened in gaps, and a bottle drunk empty
+during a workout came back with nothing logged and the app still believing it full. The
+rule now is the one under "Calibration" above: a drop across a gap is a drink once it
+clears an allowance for what the zero could have done in the time, logged less what the
+zero typically does.
 
 The other is worse and quieter. CoreBluetooth relaunches this app when the bottle
 reconnects, and that often happens while the phone is locked — where its stored
