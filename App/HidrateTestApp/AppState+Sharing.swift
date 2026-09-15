@@ -55,6 +55,7 @@ extension AppState {
         absorbGroupDiagnostics()
         adoptPendingDrinks()
         await flushHealthDeletions()
+        await retryHealthWrites()
         await refreshHealthTotal()
         await refreshStreak()
         publishSnapshot()

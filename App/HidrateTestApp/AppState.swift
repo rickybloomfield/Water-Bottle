@@ -431,8 +431,10 @@ final class AppState {
             Task { @MainActor in
                 self?.reloadPersistedBottleState()
                 // Health opens with the phone, so this is the first chance to take out
-                // the samples of drinks deleted while it was locked.
+                // the samples of drinks deleted while it was locked, and to write the
+                // ones it refused.
                 await self?.flushHealthDeletions()
+                await self?.retryHealthWrites()
             }
         }
         if autoConnect, let active = roster.active {
@@ -905,7 +907,9 @@ final class AppState {
     func volume(_ ml: Double) -> String { unit.format(ml) }
     func volumeNumber(_ ml: Double) -> String { unit.number(ml) }
 
-    func logToHealth(_ entry: IntakeEntry) async {
+    /// Write one drink to Health. `quietly` keeps a failure out of the alert: a retry
+    /// nobody asked for shouldn't greet them with an error when the app next opens.
+    func logToHealth(_ entry: IntakeEntry, quietly: Bool = false) async {
         sessionLog.write("healthkit write \(Int(entry.volumeML))mL for \(entry.id)")
         guard let index = entries.firstIndex(where: { $0.id == entry.id }), entries[index].healthKitUUID == nil else { return }
         do {
@@ -923,11 +927,26 @@ final class AppState {
             }
             await refreshHealthTotal()
         } catch {
+            sessionLog.write("healthkit write of \(entry.id) failed: \(error.localizedDescription)")
             if let index = entries.firstIndex(where: { $0.id == entry.id }) {
                 entries[index].healthError = error.localizedDescription
             }
-            lastError = "HealthKit: \(error.localizedDescription)"
+            if !quietly { lastError = "HealthKit: \(error.localizedDescription)" }
         }
+    }
+
+    /// Try again for every drink whose Health write failed. A drink arriving from the
+    /// watch is written the moment it is adopted, which is often in the background with
+    /// the phone locked, and Health's helper can refuse the call then; the drink kept the
+    /// error and nothing ever tried again, so it sat in the app and never in Health. Only
+    /// drinks a write was attempted for: one logged while auto-logging was off was never
+    /// meant to go.
+    func retryHealthWrites() async {
+        guard HealthKitWaterLogger.isAvailable, healthAuthorized, autoLogToHealth else { return }
+        let owed = entries.filter { $0.healthKitUUID == nil && $0.healthError != nil && $0.volumeML >= minimumLogML }
+        guard !owed.isEmpty else { return }
+        sessionLog.write("retrying \(owed.count) Health write(s)")
+        for entry in owed { await logToHealth(entry, quietly: true) }
     }
 
     /// Correct a logged drink's amount or time.

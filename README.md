@@ -50,8 +50,9 @@ watch never need HidrateKit, Bluetooth or Health.
 
 A tap on the widget or the watch does not wait for the app. It goes into a pending queue
 next to the snapshot and counts toward the displayed total straight away; when the phone
-app next runs it adopts those drinks into its history and writes them to Apple Health,
-then echoes their ids back so the sender stops counting them itself. So a drink logged on
+app next runs it adopts those drinks into its history and writes them to Apple Health —
+trying again at each catch-up if Health refused the write, as it can for an app woken in
+the background — then echoes their ids back so the sender stops counting them itself. So a drink logged on
 a watch out of range of the phone still lands, exactly once.
 
 A swipe on the watch is the same thing in reverse. The drink leaves the list and the total
