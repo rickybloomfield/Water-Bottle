@@ -10,9 +10,12 @@ Talk to a HidrateSpark PRO water bottle directly over Bluetooth, without the off
   toward your goal and an animated bottle whose water sloshes with device tilt and
   ripples when tapped, draining as you drink, with a celebration when you hit the goal.
   Swipe right to step back through the last month, or pick a day from the strip along the
-  top; a past day drops the bottle and the connection line, which are only true of now.
+  top; a past day drops the bottle and the connection line, which are only true of now,
+  but keeps the one-tap amounts — there a tap asks when you had the drink before logging
+  it, since the time now says nothing about a glass forgotten yesterday.
   That sideways swipe is why a drink row has none of its own: delete one from the drink
-  itself, or from its long-press menu.
+  itself, or from its long-press menu — or tap Select, pick several, and delete them
+  together.
   Any drink can be tapped for its details — where it came from and whether it reached
   Apple Health. One you logged by hand, in the app or on the widget or watch, can also be corrected
   there; one the bottle weighed cannot, since editing a measurement would quietly disagree
@@ -53,14 +56,17 @@ a watch out of range of the phone still lands, exactly once.
 
 A swipe on the watch is the same thing in reverse. The drink leaves the list and the total
 at once, and a deletion request goes to the phone, which removes the drink from its history
-and from Apple Health and echoes the request's id back — the request's, not the drink's,
-because the drink's id may already have been echoed when it was adopted, and that would
-have the watch treat the deletion as done before it was. Until the echo, the watch keeps
-the drink hidden through any snapshot that still lists it; if Health wouldn't let it go,
-the echo arrives with the drink still listed, and it comes back. A drink tapped on the
-watch and swiped away before the phone has taken it is simply un-tapped, and its queued
-transfer withdrawn — and the phone remembers the deleted id, so a copy of the drink that
-overtook the deletion is not adopted after it.
+and echoes the request's id back — the request's, not the drink's, because the drink's id
+may already have been echoed when it was adopted, and that would have the watch treat the
+deletion as done before it was. Until the echo, the watch keeps the drink hidden through
+any snapshot that still lists it. The drink's Health sample follows separately: Health is
+sealed while the phone is locked, which is where a phone in a pocket is when the request
+arrives, so the phone writes the sample down as owed and takes it out when the phone next
+unlocks or the app next catches up, leaving it out of every total in the meantime. (It used
+to put the drink back when Health refused, which had a swiped-away drink reappear on the
+wrist a moment later.) A drink tapped on the watch and swiped away before the phone has
+taken it is simply un-tapped, and its queued transfer withdrawn — and the phone remembers
+the deleted id, so a copy of the drink that overtook the deletion is not adopted after it.
 
 Keeping the three of them agreeing takes three rules:
 

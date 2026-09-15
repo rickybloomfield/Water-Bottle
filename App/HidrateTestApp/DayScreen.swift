@@ -12,8 +12,11 @@ struct DayScreen: View {
     let day: Date
     var onOpen: (AppState.TodayItem) -> Void
     var onDelete: (IntakeEntry) -> Void
-    /// Presents the full log sheet, for an amount that isn't one of the quick ones.
-    var onMore: () -> Void = {}
+    /// Presents the log sheet: for an amount that isn't one of the quick ones, or — on a
+    /// past day — for the tapped amount, so the time can be asked for before it is logged.
+    var onAdd: (AddDrinkRequest) -> Void = { _ in }
+    /// The rows picked while selecting drinks to delete, by item id.
+    var selection: Binding<Set<String>> = .constant([])
     /// How far this day's drinks have scrolled up, 0…1, for whatever sits above them.
     var scrolledUnder: Binding<CGFloat> = .constant(0)
 
@@ -37,7 +40,8 @@ struct DayScreen: View {
     var body: some View {
         TodayDataView(day: day, facts: facts, items: items, loaded: loaded,
                       onOpen: onOpen, onDelete: onDelete,
-                      onQuickAdd: quickAdd, onMore: onMore)
+                      onQuickAdd: quickAdd, onMore: { onAdd(AddDrinkRequest(day: day)) },
+                      selection: selection)
         .trackScrolledUnder(scrolledUnder)
         // No pull to refresh: the day reloads whenever a drink lands, when the screen
         // appears, and when the app comes forward — there was nothing left for the
@@ -46,17 +50,15 @@ struct DayScreen: View {
         .onAppear { Task { await reload() } }
     }
 
-    /// Logged onto this day at this time of day, which is what the plus button has always
-    /// done — the only difference is that it takes one tap instead of a sheet.
+    /// Today, a tap logs the amount now, which is what the plus button has always done —
+    /// the only difference is that it takes one tap instead of a sheet. On a past day
+    /// "now" is nothing to go on, so the tap opens the sheet at that amount and asks when.
     private func quickAdd(_ ml: Double) {
-        app.addManual(volumeML: ml, at: isToday ? Date() : onDay(Date()))
-    }
-
-    /// This time of day, on the day being looked at.
-    private func onDay(_ time: Date) -> Date {
-        let calendar = Calendar.current
-        let c = calendar.dateComponents([.hour, .minute], from: time)
-        return calendar.date(bySettingHour: c.hour ?? 12, minute: c.minute ?? 0, second: 0, of: day) ?? day
+        if isToday {
+            app.addManual(volumeML: ml)
+        } else {
+            onAdd(AddDrinkRequest(day: day, volumeML: ml))
+        }
     }
 
     private func reload() async {

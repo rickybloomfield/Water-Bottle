@@ -63,6 +63,17 @@ struct IntakeEntry: Identifiable, Codable, Hashable {
     var approximate: Bool = false
 }
 
+/// A Health sample this app wrote for a drink since deleted, which Health hasn't yet let
+/// go of. Health is sealed while the phone is locked — which is where the phone is when a
+/// deletion arrives from the watch — so the drink leaves the list at once and the sample
+/// follows when the store next opens. Carries the sample's day and amount so the totals
+/// can leave it out in the meantime.
+struct PendingHealthDeletion: Codable, Hashable {
+    var uuid: UUID
+    var date: Date
+    var volumeML: Double
+}
+
 enum IntakeSource: String, CaseIterable, Identifiable {
     case weight
     case bottleSips
@@ -108,6 +119,18 @@ final class AppState {
     /// Bumped on every change to `entries`. Screens that hold a snapshot of a day watch
     /// this rather than the count, which doesn't move when a drink is only corrected.
     private(set) var entriesRevision = 0
+    /// Samples of deleted drinks still to be taken out of Health. Persisted beside the
+    /// entries: a deletion can arrive with the phone locked and the app about to be
+    /// suspended, and the sample has to be remembered past both.
+    private(set) var pendingHealthDeletions: [PendingHealthDeletion] = [] {
+        didSet {
+            guard pendingHealthDeletions != oldValue else { return }
+            savePendingHealthDeletions()
+            // Only the totals change — the day's list stopped showing the drink when the
+            // entry went — but that is enough to move a ring.
+            entriesRevision &+= 1
+        }
+    }
     var autoLogToHealth: Bool { didSet { defaults.set(autoLogToHealth, forKey: Keys.autoLog) } }
     var intakeSource: IntakeSource { didSet { defaults.set(intakeSource.rawValue, forKey: Keys.source) } }
     var minimumLogML: Double { didSet { defaults.set(minimumLogML, forKey: Keys.minimumLog) } }
@@ -257,6 +280,7 @@ final class AppState {
 
     private let defaults = UserDefaults.standard
     private let entriesURL: URL
+    private let pendingHealthDeletionsURL: URL
 
     private enum Keys {
         static let autoLog = "app.autoLogToHealth"
@@ -350,6 +374,7 @@ final class AppState {
         let support = (try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
             ?? FileManager.default.temporaryDirectory
         entriesURL = support.appendingPathComponent("intake-entries.json")
+        pendingHealthDeletionsURL = support.appendingPathComponent("pending-health-deletions.json")
         migrateSingleBottleIfNeeded()
         adoptABottleIfNoneIsInUse()
         // Before anything can arrive from the radio: a reading is only meaningful through
@@ -358,6 +383,7 @@ final class AppState {
         adoptedDrinkIDs = (defaults.stringArray(forKey: Keys.adopted) ?? []).compactMap(UUID.init(uuidString:))
         deletedDrinkIDs = (defaults.stringArray(forKey: Keys.deleted) ?? []).compactMap(UUID.init(uuidString:))
         loadEntries()
+        loadPendingHealthDeletions()
         sessionLog.write(omitsNote)
 
         if let data = defaults.data(forKey: Keys.tracker),
@@ -402,7 +428,12 @@ final class AppState {
         ) { [weak self] _ in
             // Hop rather than assert: an isolation check that fails is a crash, and this
             // is not worth crashing over. (The watch app crashed on exactly that.)
-            Task { @MainActor in self?.reloadPersistedBottleState() }
+            Task { @MainActor in
+                self?.reloadPersistedBottleState()
+                // Health opens with the phone, so this is the first chance to take out
+                // the samples of drinks deleted while it was locked.
+                await self?.flushHealthDeletions()
+            }
         }
         if autoConnect, let active = roster.active {
             model.use(active)
@@ -631,6 +662,12 @@ final class AppState {
         var volumeML: Double {
             switch self { case .entry(let e): e.volumeML; case .health(let s): s.milliliters }
         }
+        /// This app's own drinks can go; a sample another app wrote to Health is its to
+        /// remove.
+        var isDeletable: Bool {
+            if case .entry = self { return true }
+            return false
+        }
     }
 
     /// Today's drinks from every source, newest first.
@@ -659,6 +696,12 @@ final class AppState {
         }
         if let health, !health.isEmpty {
             for (day, ml) in health { totals[calendar.startOfDay(for: day), default: 0] += ml }
+            // Health still reports the samples of drinks deleted while it was sealed;
+            // they are gone from the list, so they come off the day's number too.
+            for deletion in pendingHealthDeletions where cutoff.map({ deletion.date >= $0 }) ?? true {
+                let day = calendar.startOfDay(for: deletion.date)
+                totals[day] = max((totals[day] ?? 0) - deletion.volumeML, 0)
+            }
         }
         for entry in entries where inWindow(entry) {
             // Health already counted the ones it has.
@@ -764,8 +807,13 @@ final class AppState {
     /// and the Today tab has a page per day, each of which would otherwise run its own.
     private(set) var streakDays = 0
 
-    /// How far back a streak is looked for. Long enough that nobody reaches the end of it.
+    /// How far back a streak is looked for to begin with. A run that reaches the edge of
+    /// the window is looked for again over twice the span, until it ends inside one: a
+    /// fixed window reported every streak longer than itself as its own length, and the
+    /// number then sat at 399 day after day.
     private static let streakLookbackDays = 400
+    /// Where the widening stops: a Health history longer than this is nobody's.
+    private static let streakLookbackLimitDays = 366 * 30
     private var streakTask: Task<Void, Never>?
 
     /// Ask for a new streak. Coalesced, because a burst of sips would otherwise each
@@ -776,11 +824,23 @@ final class AppState {
     }
 
     func refreshStreak(calendar: Calendar = .current) async {
-        let totals = await dailyTotals(days: Self.streakLookbackDays, calendar: calendar)
-        guard !Task.isCancelled else { return }
-        streakDays = TodayFacts.streak(in: totals, goalML: dailyGoalML,
-                                       todayTotalML: todayTotalML, unit: unit,
-                                       calendar: calendar)
+        var days = Self.streakLookbackDays
+        while true {
+            let totals = await dailyTotals(days: days, calendar: calendar)
+            guard !Task.isCancelled else { return }
+            let streak = TodayFacts.streak(in: totals, goalML: dailyGoalML,
+                                           todayTotalML: todayTotalML, unit: unit,
+                                           calendar: calendar)
+            // The window holds today and `days - 1` days before it, and the run is counted
+            // from today or from yesterday: one of `days - 1` or more has reached the
+            // window's first day and may go on past it.
+            if streak < days - 1 || days >= Self.streakLookbackLimitDays {
+                streakDays = streak
+                return
+            }
+            sessionLog.write("streak of \(streak) reaches the \(days)-day window's edge; looking further back")
+            days = min(days * 2, Self.streakLookbackLimitDays)
+        }
     }
 
     /// Everything either Today screen needs about today. `streak` is passed in because it
@@ -878,18 +938,16 @@ final class AppState {
     func update(_ entry: IntakeEntry, volumeML: Double, at date: Date) async {
         guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
         if let uuid = entries[index].healthKitUUID {
-            do {
-                try await health.deleteWater(uuid: uuid)
-            } catch {
-                lastError = "HealthKit: \(error.localizedDescription)"
-                return
-            }
+            // Owed to Health rather than waited for: the old sample is gone from the app
+            // either way, and a sealed store shouldn't stop a correction.
+            pendingHealthDeletions.append(PendingHealthDeletion(uuid: uuid, date: entries[index].date, volumeML: entries[index].volumeML))
             entries[index].healthKitUUID = nil
         }
         entries[index].volumeML = volumeML.rounded()
         entries[index].date = date
         entries[index].healthError = nil
         sessionLog.write("edited \(Int(entries[index].volumeML))mL at \(Format.time.string(from: date))")
+        await flushHealthDeletions()
         if autoLogToHealth, entries[index].volumeML >= minimumLogML {
             await logToHealth(entries[index])
         }
@@ -897,40 +955,67 @@ final class AppState {
     }
 
     /// Remove a drink, from the app and from Apple Health.
+    func delete(_ entry: IntakeEntry) async {
+        await delete([entry])
+    }
+
+    /// Remove drinks, from the app and from Apple Health.
     ///
-    /// The row goes at once and Health catches up behind it. Deleting a sample can take
+    /// The rows go at once and Health catches up behind them. Deleting a sample can take
     /// seconds, and a row that sits there through them reads as a tap that didn't land —
     /// so it gets tapped again, and again, each one racing the last. Going first also
     /// makes the second tap harmless: there is no longer an entry with that id to find.
     ///
-    /// If Health refuses, the drink comes back where it was, because the sample is still
-    /// there and the two have to agree.
+    /// Health may also refuse outright, and the drink still goes. Its store is sealed
+    /// while the phone is locked, and a locked phone in a pocket is exactly where a
+    /// deletion from the watch finds it; the sample is written down as owed instead and
+    /// taken out when the store next opens. Putting the drink back, which is what used to
+    /// happen, had it reappear on the wrist a moment after being swiped away.
     ///
     /// A drink the bottle measured came off the level the app carries for it, and a
-    /// deleted one usually wasn't a drink at all, so its water goes back — once Health has
-    /// agreed, so there is nothing to undo if it doesn't. A hand-logged drink never
-    /// touched the bottle, so the model hears only about the bottle's own.
-    func delete(_ entry: IntakeEntry) async {
-        guard let index = entries.firstIndex(where: { $0.id == entry.id }) else { return }
-        let removed = entries[index]
-        sessionLog.write("delete \(Int(removed.volumeML))mL at \(Format.time.string(from: removed.date))")
-        entries.remove(at: index)
-        if let uuid = removed.healthKitUUID {
-            do {
-                try await health.deleteWater(uuid: uuid)
-            } catch {
-                entries.insert(removed, at: min(index, entries.count))
-                lastError = "HealthKit delete failed: \(error.localizedDescription)"
-                return
-            }
+    /// deleted one usually wasn't a drink at all, so its water goes back. A hand-logged
+    /// drink never touched the bottle, so the model hears only about the bottle's own.
+    func delete(_ toDelete: [IntakeEntry]) async {
+        let ids = Set(toDelete.map(\.id))
+        let removed = entries.filter { ids.contains($0.id) }
+        guard !removed.isEmpty else { return }
+        for entry in removed {
+            sessionLog.write("delete \(Int(entry.volumeML))mL at \(Format.time.string(from: entry.date))\(entry.healthKitUUID == nil ? "" : " (in Health)")")
         }
-        if removed.source == .weight {
-            model.removeLevelChange(id: removed.id, volumeML: removed.volumeML, date: removed.date)
-            if let level = model.believedLevelML {
-                sessionLog.write("level after delete \(Int(level))mL")
-            }
+        entries.removeAll { ids.contains($0.id) }
+        // One append rather than one per drink: each assignment saves the file and moves
+        // the revision every screen is watching.
+        pendingHealthDeletions += removed.compactMap { entry in
+            entry.healthKitUUID.map { PendingHealthDeletion(uuid: $0, date: entry.date, volumeML: entry.volumeML) }
         }
+        for entry in removed where entry.source == .weight {
+            model.removeLevelChange(id: entry.id, volumeML: entry.volumeML, date: entry.date)
+        }
+        if removed.contains(where: { $0.source == .weight }), let level = model.believedLevelML {
+            sessionLog.write("level after delete \(Int(level))mL")
+        }
+        await flushHealthDeletions()
         await refreshHealthTotal()
+    }
+
+    /// Take the samples of deleted drinks out of Health, as many as it will let go of.
+    /// Whatever it keeps is tried again at the next catch-up and the moment the phone
+    /// unlocks. Not tried at all while the phone is locked: the store is sealed then, and
+    /// every attempt would fail the same way.
+    func flushHealthDeletions() async {
+        guard !pendingHealthDeletions.isEmpty, HealthKitWaterLogger.isAvailable else { return }
+        guard UIApplication.shared.isProtectedDataAvailable else {
+            return sessionLog.write("\(pendingHealthDeletions.count) Health deletion(s) waiting: the phone is locked")
+        }
+        for deletion in pendingHealthDeletions {
+            do {
+                try await health.deleteWater(uuid: deletion.uuid)
+                pendingHealthDeletions.removeAll { $0.uuid == deletion.uuid }
+                sessionLog.write("healthkit deleted \(Int(deletion.volumeML))mL sample \(deletion.uuid)")
+            } catch {
+                sessionLog.write("healthkit delete of \(deletion.uuid) kept for later: \(error.localizedDescription)")
+            }
+        }
     }
 
     /// Flash the bottle LED for a drink: show the colour byte, then send the "off" byte
@@ -1063,6 +1148,17 @@ final class AppState {
     private func saveEntries() {
         guard let data = try? JSONEncoder().encode(entries) else { return }
         try? data.write(to: entriesURL, options: .atomic)
+    }
+
+    private func loadPendingHealthDeletions() {
+        guard let data = try? Data(contentsOf: pendingHealthDeletionsURL),
+              let decoded = try? JSONDecoder().decode([PendingHealthDeletion].self, from: data) else { return }
+        pendingHealthDeletions = decoded
+    }
+
+    private func savePendingHealthDeletions() {
+        guard let data = try? JSONEncoder().encode(pendingHealthDeletions) else { return }
+        try? data.write(to: pendingHealthDeletionsURL, options: .atomic)
     }
 }
 

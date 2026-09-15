@@ -18,11 +18,13 @@ struct TodayDataView: View {
     var onDelete: (IntakeEntry) -> Void
     var onQuickAdd: (Double) -> Void
     var onMore: () -> Void
+    /// The rows picked while selecting, by item id.
+    var selection: Binding<Set<String>> = .constant([])
 
     private var isToday: Bool { Calendar.current.isDateInToday(day) }
 
     var body: some View {
-        List {
+        List(selection: selection) {
             Section {
                 summaryCard
                     // The row gap alone left 3pt under the tile; this brings it level
@@ -30,15 +32,17 @@ struct TodayDataView: View {
                     .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 13, trailing: 0))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
-                if isToday {
-                    QuickAddRow(onMore: onMore, onAdd: onQuickAdd)
-                        // The section's rounded bottom corner clips whatever reaches it,
-                        // which was taking a bite out of the first button. This keeps the
-                        // buttons clear of it.
-                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 16, trailing: 0))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparator(.hidden)
-                }
+                    .selectionDisabled()
+                // On a past day too: a glass forgotten yesterday is still a glass. There
+                // a tap asks when, rather than logging at whatever time it is now.
+                QuickAddRow(onMore: onMore, onAdd: onQuickAdd)
+                    // The section's rounded bottom corner clips whatever reaches it,
+                    // which was taking a bite out of the first button. This keeps the
+                    // buttons clear of it.
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 16, trailing: 0))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+                    .selectionDisabled()
             }
             drinksSection
         }
@@ -187,11 +191,14 @@ struct TodayDataView: View {
                     Label(loaded ? "No drinks yet" : "Loading…", systemImage: "drop")
                 } description: {
                     Text(loaded ? (isToday ? "Take a sip from your bottle, or tap an amount above."
-                                           : "Nothing was logged on this day.") : "")
+                                           : "Nothing was logged on this day. Tap an amount above to add a drink you forgot.") : "")
                 }
             } else {
                 ForEach(items) { item in
                     DrinkItemRow(item: item, onOpen: { onOpen(item) }, onDelete: onDelete)
+                        // Water another app wrote to Health is that app's to remove, so
+                        // there is nothing to pick it for.
+                        .selectionDisabled(!item.isDeletable)
                 }
             }
         } header: {

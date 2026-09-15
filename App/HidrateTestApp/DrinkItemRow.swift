@@ -10,10 +10,13 @@ import SwiftUI
 /// on the long-press menu.
 struct DrinkItemRow: View {
     @Environment(AppState.self) private var app
+    @Environment(\.editMode) private var editMode
 
     var item: AppState.TodayItem
     var onOpen: () -> Void
     var onDelete: (IntakeEntry) -> Void
+
+    private var selecting: Bool { editMode?.wrappedValue.isEditing ?? false }
 
     var body: some View {
         Group {
@@ -25,6 +28,9 @@ struct DrinkItemRow: View {
         .padding(.vertical, 4)
         .contentShape(Rectangle())
         .onTapGesture(perform: onOpen)
+        // While drinks are being picked a tap is the list's, to toggle the row; the
+        // gesture above would otherwise take it and open the drink instead.
+        .allowsHitTesting(!selecting)
     }
 
     private func entryRow(_ entry: IntakeEntry) -> some View {

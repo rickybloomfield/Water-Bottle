@@ -11,11 +11,14 @@ struct TodayView: View {
     @Environment(AppState.self) private var app
 
     @State private var selectedDay = Calendar.current.startOfDay(for: Date())
-    @State private var showManualAdd = false
+    @State private var addDrink: AddDrinkRequest?
     @State private var showDays = false
     @State private var showSettings = false
     @State private var detail: AppState.TodayItem?
-    @State private var pendingDelete: IntakeEntry?
+    @State private var pendingDelete: [IntakeEntry]?
+    /// Picking several drinks to delete at once, and which.
+    @State private var selecting = false
+    @State private var selectedItems: Set<String> = []
     /// How far the day on screen has been scrolled, so the rail can cast a line.
     @State private var scrolledUnder: CGFloat = 0
     /// Daily totals behind the week rail's rings. Loaded once and refreshed whenever a
@@ -74,8 +77,9 @@ struct TodayView: View {
                     ForEach(days, id: \.self) { day in
                         DayScreen(day: day,
                                   onOpen: { detail = $0 },
-                                  onDelete: { pendingDelete = $0 },
-                                  onMore: { showManualAdd = true },
+                                  onDelete: { pendingDelete = [$0] },
+                                  onAdd: { addDrink = $0 },
+                                  selection: $selectedItems,
                                   scrolledUnder: $scrolledUnder)
                             .containerRelativeFrame(.horizontal)
                             .id(day)
@@ -126,14 +130,17 @@ struct TodayView: View {
                     Button("Settings", systemImage: "gearshape") { showSettings = true }
                 }
             }
+            .dayDeletion(day: selectedDay, selecting: $selecting, selected: $selectedItems, pending: $pendingDelete)
             .task(id: app.entriesRevision) { dailyTotals = await app.dailyTotals(days: Self.weeksBack * 7) }
-            .sheet(isPresented: $showManualAdd) { AddDrinkView(day: selectedDay, startingAt: app.unit.defaultDrinkML) }
+            .sheet(item: $addDrink) { request in
+                AddDrinkView(day: request.day, startingAt: request.volumeML ?? app.unit.defaultDrinkML)
+            }
             .sheet(isPresented: $showDays) {
                 NavigationStack { AllDaysView(onDone: { showDays = false }) }
             }
             .sheet(isPresented: $showSettings) { SettingsView(onDone: { showSettings = false }) }
             .sheet(item: $detail) { item in
-                DrinkDetailView(item: item) { entry in pendingDelete = entry }
+                DrinkDetailView(item: item) { entry in pendingDelete = [entry] }
             }
             .overlay {
                 if app.showCelebration {
@@ -143,14 +150,6 @@ struct TodayView: View {
                 }
             }
             .animation(.spring(duration: 0.4), value: app.showCelebration)
-            .alert("Delete this drink?",
-                   isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
-                   presenting: pendingDelete) { entry in
-                Button("Delete", role: .destructive) { Task { await app.delete(entry) } }
-                Button("Cancel", role: .cancel) {}
-            } message: { entry in
-                Text("This removes \(app.volume(entry.volumeML)) from \(DayTimeline.label(entry.date).lowercased())\(entry.healthKitUUID != nil ? " and from Apple Health" : "").")
-            }
             .alert("Something went wrong", isPresented: Binding(get: { app.lastError != nil }, set: { if !$0 { app.lastError = nil } })) {
                 Button("OK", role: .cancel) {}
             } message: { Text(app.lastError ?? "") }

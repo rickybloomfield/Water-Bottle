@@ -54,6 +54,7 @@ extension AppState {
     func catchUp() async {
         absorbGroupDiagnostics()
         adoptPendingDrinks()
+        await flushHealthDeletions()
         await refreshHealthTotal()
         await refreshStreak()
         publishSnapshot()
