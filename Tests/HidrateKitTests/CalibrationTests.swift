@@ -63,7 +63,7 @@ struct StableWeightFilterTests {
 struct LevelTrackerTests {
     let t0 = Date(timeIntervalSince1970: 1_000_000)
     func tracker() -> LevelTracker {
-        LevelTracker(configuration: .init(minDrinkML: 15, refillFractionOfCapacity: 0.5, nearFullFraction: 0.9), capacityML: 621)
+        LevelTracker(configuration: .init(minDrinkML: 15, refillFractionOfCapacity: 0.5, nearFullFraction: 0.9, restSeconds: 0), capacityML: 621)
     }
 
     @Test func firstReadingIsBaseline() {
@@ -346,7 +346,7 @@ struct NearEmptyTests {
     /// The ordering that matters: a drop past the drink threshold is a drink even when it
     /// lands below empty. Re-zeroing on it instead would swallow the drink whole.
     @Test func aDropBelowEmptyIsStillADrink() {
-        var tracker = LevelTracker(capacityML: 621)
+        var tracker = LevelTracker(configuration: .init(restSeconds: 0), capacityML: 621)
         _ = tracker.ingest(levelML: 80)
         let change = tracker.ingest(levelML: -40)
         guard case .drink(let volume, _, _)? = change else {
@@ -359,7 +359,7 @@ struct NearEmptyTests {
     /// Drift, by contrast, arrives in steps too small to be a drink and the tracker makes
     /// nothing of them — which is the signal that the zero, not the water, has moved.
     @Test func slowDriftBelowEmptyProducesNoChange() {
-        var tracker = LevelTracker(capacityML: 621)
+        var tracker = LevelTracker(configuration: .init(restSeconds: 0), capacityML: 621)
         _ = tracker.ingest(levelML: 10)
         for level in stride(from: 5.0, through: -40.0, by: -5.0) {
             #expect(tracker.ingest(levelML: level) == nil)
@@ -375,7 +375,7 @@ struct BelievedLevelTests {
     /// Reproduces a day: fill to the top, three drinks, and an hour of creep between
     /// them. The believed level follows the water; the scale does not.
     @Test func followsDrinksAndIgnoresDrift() {
-        var tracker = LevelTracker(capacityML: capacity)
+        var tracker = LevelTracker(configuration: .init(restSeconds: 0), capacityML: capacity)
         var believed = 0.0
         var scale = 0.0
 
@@ -411,7 +411,7 @@ struct BelievedLevelTests {
     /// Miss an event and the believed level is wrong. Adding most of a bottleful puts it
     /// back, because the water had nowhere else to go.
     @Test func fillingFromEmptyResynchronises() {
-        var tracker = LevelTracker(capacityML: capacity)
+        var tracker = LevelTracker(configuration: .init(restSeconds: 0), capacityML: capacity)
         var believed = 200.0                    // out of step: the bottle really holds 20
         _ = tracker.ingest(levelML: 20)
         if case .refill(let volume, _, _)? = tracker.ingest(levelML: capacity) {
@@ -423,7 +423,7 @@ struct BelievedLevelTests {
     /// A top-up says how much went in, not how much is there, so it cannot resynchronise
     /// a believed level that is already wrong — it can only add to it.
     @Test func aTopUpOnlyAddsWhatWentIn() {
-        var tracker = LevelTracker(capacityML: capacity)
+        var tracker = LevelTracker(configuration: .init(restSeconds: 0), capacityML: capacity)
         var believed = 200.0
         _ = tracker.ingest(levelML: 400)
         if case .refill(let volume, _, _)? = tracker.ingest(levelML: capacity) {
@@ -513,7 +513,7 @@ struct HandlingTests {
     let capacity = 621.0
     let t0 = Date(timeIntervalSince1970: 1_000_000)
 
-    func tracker() -> LevelTracker { LevelTracker(capacityML: 621) }
+    func tracker() -> LevelTracker { LevelTracker(configuration: .init(restSeconds: 0), capacityML: 621) }
 
     /// 17:22 on the day it was reported: resting at 1169 mL (the zero had been moved onto
     /// a lifted bottle hours earlier), 434 mL in the hand, back to 1193 mL on the table.
@@ -614,7 +614,7 @@ struct UpwardDriftTests {
     let t0 = Date(timeIntervalSince1970: 1_000_000)
 
     @Test func creepPastTheFillLineIsNeverARefill() {
-        var t = LevelTracker(capacityML: 621)
+        var t = LevelTracker(configuration: .init(restSeconds: 0), capacityML: 621)
         var level = 600.0
         _ = t.ingest(levelML: level, at: t0)
         for step in 1...600 {                      // two and a half hours at 15 s a reading
@@ -631,7 +631,7 @@ struct UpwardDriftTests {
     /// A step up is still a top-off, because water arrives between two readings and drift
     /// does not.
     @Test func aStepUpToTheBrimIsARefill() {
-        var t = LevelTracker(capacityML: 621)
+        var t = LevelTracker(configuration: .init(restSeconds: 0), capacityML: 621)
         _ = t.ingest(levelML: 500, at: t0)
         #expect(t.ingest(levelML: 610, at: t0 + 15)?.isRefill == true)
     }
@@ -639,7 +639,7 @@ struct UpwardDriftTests {
     /// And a step up that is a different surface reading high is neither a refill nor
     /// something the baseline adopts.
     @Test func aSurfaceReadingHighIsNeitherRefillNorBaseline() {
-        var t = LevelTracker(capacityML: 621)
+        var t = LevelTracker(configuration: .init(restSeconds: 0), capacityML: 621)
         _ = t.ingest(levelML: 300, at: t0)
         #expect(t.ingest(levelML: 340, at: t0 + 15) == nil)
         #expect(t.baselineML == 300)
@@ -656,7 +656,7 @@ struct WashingTests {
     let capacity = 621.0
     let t0 = Date(timeIntervalSince1970: 1_000_000)
 
-    func tracker() -> LevelTracker { LevelTracker(capacityML: 621) }
+    func tracker() -> LevelTracker { LevelTracker(configuration: .init(restSeconds: 0), capacityML: 621) }
 
     /// 16:34:58: resting at 1521 mL a quarter of an hour before, the emptied bottle read
     /// 822 — held, since emptying a bottle into a sink reads exactly like drinking it —
@@ -795,7 +795,7 @@ struct GapTests {
     /// 08:00:57, the last resting reading before the gap.
     let t0 = Date(timeIntervalSince1970: 1_000_000)
 
-    func tracker() -> LevelTracker { LevelTracker(capacityML: 621) }
+    func tracker() -> LevelTracker { LevelTracker(configuration: .init(restSeconds: 0), capacityML: 621) }
 
     /// At rest reading 641 (the zero had crept up 20 since Full). 08:30:56, a new
     /// connection: −771, in a hand. 08:31:04 set down empty at −123, and there it stayed.
@@ -966,6 +966,88 @@ struct GapTests {
         }
         #expect(from == 600)
         #expect(abs(volume - (552 - 7.5)) < 0.01, "logged once, less a quarter-hour's drift: \(volume)")
+    }
+}
+
+/// The evening of 15 September, the bottle being played with: pushed down, picked up
+/// and set straight back, jostled. Each push read as a refill and each release as a
+/// drink — +579 then −579 a minute apart, of the same water — and a lift set back down
+/// reading lower was a drink of the difference. Nothing is measured now until the bottle
+/// has rested: half a minute of readings that sit still. The suites above turn that off
+/// to test the rules one reading at a time; these test the rest.
+@Suite("Resting before measuring")
+struct RestingTests {
+    let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    func tracker() -> LevelTracker { LevelTracker(capacityML: 621) }
+
+    /// Three readings, fifteen seconds apart, are a rest; the first two are not yet.
+    @Test func aBaselineTakesHalfAMinute() {
+        var t = tracker()
+        #expect(t.ingest(levelML: 396, at: t0) == nil)
+        #expect(t.ingest(levelML: 397, at: t0 + 15) == nil)
+        #expect(t.ingest(levelML: 396, at: t0 + 30) == .baseline(levelML: 396))
+    }
+
+    /// 19:39: at rest reading 396, pushed to 975 for six seconds, back to 396 and left.
+    /// Neither the push nor the release rests, and the baseline never moved.
+    @Test func aPushThatComesStraightBackIsNothing() {
+        var t = tracker()
+        for i in 0...2 { _ = t.ingest(levelML: 396, at: t0 + Double(i) * 15) }
+        #expect(t.baselineML == 396)
+        #expect(t.ingest(levelML: 975, at: t0 + 36) == nil)
+        #expect(t.ingest(levelML: 975, at: t0 + 38) == nil)
+        #expect(t.ingest(levelML: 396, at: t0 + 40) == nil)
+        var changes: [LevelChange?] = []
+        for i in 1...10 { changes.append(t.ingest(levelML: 396, at: t0 + 40 + Double(i) * 15)) }
+        #expect(changes.allSatisfy { $0 == nil }, "\(changes.compactMap { $0 })")
+        #expect(t.baselineML == 396)
+    }
+
+    /// A refill has to stay: filled to the brim and left, it is a refill half a minute on.
+    @Test func aRefillThatStaysIsARefill() {
+        var t = tracker()
+        for i in 0...2 { _ = t.ingest(levelML: 100, at: t0 + Double(i) * 15) }
+        #expect(t.ingest(levelML: 615, at: t0 + 45) == nil, "not yet")
+        #expect(t.ingest(levelML: 616, at: t0 + 60) == nil)
+        #expect(t.ingest(levelML: 616, at: t0 + 75)?.isRefill == true)
+    }
+
+    /// A drink: picked up, drunk from, set down and left. Logged once the bottle has
+    /// rested, half a minute after it was set down, and exact.
+    @Test func aDrinkIsLoggedOnceTheBottleHasRested() {
+        var t = tracker()
+        for i in 0...2 { _ = t.ingest(levelML: 500, at: t0 + Double(i) * 15) }
+        #expect(t.ingest(levelML: -600, at: t0 + 45)?.isHandled == true)
+        #expect(t.ingest(levelML: 400, at: t0 + 60) == nil, "set down; not yet at rest")
+        #expect(t.ingest(levelML: 401, at: t0 + 75) == nil)
+        #expect(t.ingest(levelML: 401, at: t0 + 90) == .drink(volumeML: 99, fromML: 500, toML: 401))
+    }
+
+    /// 18:29: lifted, set down 84 lower, and picked up again twenty seconds later to
+    /// read about where it was. It never rested lower, so nothing is logged.
+    @Test func aSetDownThatIsPickedStraightUpAgainIsNothing() {
+        var t = tracker()
+        for i in 0...2 { _ = t.ingest(levelML: 424, at: t0 + Double(i) * 15) }
+        #expect(t.ingest(levelML: -472, at: t0 + 45)?.isHandled == true)
+        #expect(t.ingest(levelML: 340, at: t0 + 60) == nil)
+        #expect(t.ingest(levelML: 415, at: t0 + 75) == nil)
+        #expect(t.ingest(levelML: 416, at: t0 + 90) == nil)
+        #expect(t.ingest(levelML: 415, at: t0 + 105) == nil, "at rest again, 9 mL under: drift")
+        #expect(t.baselineML == 415)
+    }
+
+    /// Once at rest, every reading is measured as it comes: a bottle that sits still
+    /// does not wait half a minute for each sip.
+    @Test func aRestingBottleMeasuresEveryReading() {
+        var t = tracker()
+        for i in 0...3 { _ = t.ingest(levelML: 500, at: t0 + Double(i) * 15) }
+        #expect(t.ingest(levelML: 490, at: t0 + 60) == nil, "10 mL: drift, followed")
+        #expect(t.baselineML == 490)
+        // A sip taken without lifting the bottle off its sensor, say through a straw.
+        #expect(t.ingest(levelML: 470, at: t0 + 75) == nil, "a 20 mL step: not yet rested there")
+        #expect(t.ingest(levelML: 470, at: t0 + 90) == nil)
+        #expect(t.ingest(levelML: 470, at: t0 + 105) == .drink(volumeML: 20, fromML: 490, toML: 470))
     }
 }
 

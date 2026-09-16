@@ -301,6 +301,17 @@ the gap's allowance for drift. Half an hour of such readings, though, is not a h
 zero has moved for good — the puck re-seated after a wash, most likely — and the baseline
 is forgotten, so that the next resting reading starts afresh with nothing logged.
 
+Nothing is measured until the bottle has rested: half a minute of readings that each sit
+within a few millilitres of the last. A bottle pushed down reads a refill's worth higher
+for as long as the hand is on it, and a bottle lifted and set straight back down reads a
+drink's worth lower for a moment; neither rests, and neither is anything. On the evening of
+15 September a bottle being played with read +579 and then −579 a minute apart, a refill
+and a drink of the same water, and a set-down picked straight up again was a drink of 84.
+A real refill or drink stays, and is logged half a minute after the bottle is set down.
+That is the one thing the scale cannot see through: a bottle set back down while the load
+cell is still relaxing from a push can read a couple of hundred millilitres lower and stay
+there, and that is logged as the drink it looks like, to be deleted.
+
 What falls between "off the sensor" and "an ordinary sip" is a drop of half a bottle or so
 that still looks plausible — and those are held back and only logged once they have stayed
 down for a minute. A bottle that was only carried comes back long before that; water that
