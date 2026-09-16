@@ -973,20 +973,48 @@ struct GapTests {
 /// and set straight back, jostled. Each push read as a refill and each release as a
 /// drink — +579 then −579 a minute apart, of the same water — and a lift set back down
 /// reading lower was a drink of the difference. Nothing is measured now until the bottle
-/// has rested: half a minute of readings that sit still. The suites above turn that off
-/// to test the rules one reading at a time; these test the rest.
+/// has rested: three readings that sit still over at least eight seconds, which after
+/// handling is under ten seconds — and a rise has to hold for half a minute before it is
+/// a refill, since a push looks exactly like one until the hand lets go. The suites above
+/// turn the rest off to test the rules one reading at a time; these test the rest.
 @Suite("Resting before measuring")
 struct RestingTests {
     let t0 = Date(timeIntervalSince1970: 1_000_000)
 
     func tracker() -> LevelTracker { LevelTracker(capacityML: 621) }
 
-    /// Three readings, fifteen seconds apart, are a rest; the first two are not yet.
-    @Test func aBaselineTakesHalfAMinute() {
+    /// Three readings that agree are a rest; the first two are not yet.
+    @Test func aBaselineTakesThreeReadings() {
         var t = tracker()
         #expect(t.ingest(levelML: 396, at: t0) == nil)
         #expect(t.ingest(levelML: 397, at: t0 + 15) == nil)
         #expect(t.ingest(levelML: 396, at: t0 + 30) == .baseline(levelML: 396))
+    }
+
+    /// After handling the bottle reports every three to four seconds, so a drink is
+    /// logged inside ten seconds of the bottle being set down.
+    @Test func aDrinkIsLoggedWithinTenSecondsOfSettingDown() {
+        var t = tracker()
+        for i in 0...2 { _ = t.ingest(levelML: 500, at: t0 + Double(i) * 15) }
+        #expect(t.ingest(levelML: -600, at: t0 + 45)?.isHandled == true)
+        let down = t0 + 60
+        #expect(t.ingest(levelML: 401, at: down) == nil)
+        #expect(t.ingest(levelML: 400, at: down + 3) == nil)
+        #expect(t.ingest(levelML: 401, at: down + 7.5) == nil, "three readings, but not eight seconds yet")
+        #expect(t.ingest(levelML: 400, at: down + 9) == .drink(volumeML: 100, fromML: 500, toML: 400))
+    }
+
+    /// 19:52: pushed and held for fifteen seconds — five readings agreeing 220 mL up —
+    /// then let go. A rise has to hold for half a minute to be a refill, so the baseline
+    /// never moved, and letting go is a change of nothing.
+    @Test func aPushHeldForFifteenSecondsIsStillNothing() {
+        var t = tracker()
+        for i in 0...2 { _ = t.ingest(levelML: 376, at: t0 + Double(i) * 15) }
+        var changes: [LevelChange?] = []
+        for i in 0..<5 { changes.append(t.ingest(levelML: 596 + Double(i % 2) * 5, at: t0 + 45 + Double(i) * 3.5)) }
+        for i in 0..<4 { changes.append(t.ingest(levelML: 372, at: t0 + 62 + Double(i) * 3.5)) }
+        #expect(changes.allSatisfy { $0 == nil }, "\(changes.compactMap { $0 })")
+        #expect(t.baselineML == 372, "drift, followed; nothing logged")
     }
 
     /// 19:39: at rest reading 396, pushed to 975 for six seconds, back to 396 and left.

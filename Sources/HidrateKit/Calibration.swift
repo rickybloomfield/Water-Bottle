@@ -223,12 +223,16 @@ public struct CreepEstimator: Sendable {
 ///   hour is taken as where it rests, under the floor or not — provisionally, since it
 ///   may be sitting off its sensor: nothing is measured from there until a rise past
 ///   the margin says it has been set back down.
-/// * **Nothing is measured until the bottle has rested**: `restSeconds` of readings each
-///   within `restToleranceML` of the last. A bottle pushed down reads a refill's worth
-///   higher for as long as the hand is on it, and a bottle lifted and set straight back
-///   reads a drink's worth lower for a moment; neither rests, and neither is anything.
-///   The evening of 15 September, a bottle played with, read +579 then −579 a minute
-///   apart, a refill and a drink of the same water. A real refill or drink stays.
+/// * **Nothing is measured until the bottle has rested**: `restReadings` readings each
+///   within `restToleranceML` of the last, spanning `restSeconds`. After handling the
+///   bottle reports every three or four seconds, so that is under ten seconds after it
+///   is set down. A rise is adopted as a refill only once it has held for
+///   `refillRestSeconds`: a bottle pushed down reads a refill's worth higher for as long
+///   as the hand is on it, and the evening of 15 September a bottle played with read
+///   +579 then −579 a minute apart, a refill and a drink of the same water. A push never
+///   moves the baseline now, so its release is a change of nothing; a real refill stays,
+///   and nothing about a refill is urgent. A lift set straight back down reads a drink's
+///   worth lower for a moment, and does not rest there either.
 /// * **A drink is a drop between two resting readings**, less what the zero could have
 ///   done in between. Between readings seconds apart that is one interval of creep
 ///   (`creepMLPerSecond`). Across a gap — the bottle out of range for a workout, asleep
@@ -316,10 +320,16 @@ public struct LevelTracker: Sendable {
         /// good, and the baseline is forgotten so the next resting reading starts afresh.
         public var offSensorForgetAfterSeconds: TimeInterval
         /// How long the readings have to sit still — each within `restToleranceML` of the
-        /// last — before the bottle counts as at rest and the level is measured. A push
-        /// or a lift that comes straight back never rests, and is nothing. Zero measures
-        /// every settled reading as it comes.
+        /// last — before the bottle counts as at rest and the level is measured. A lift
+        /// that comes straight back never rests, and is nothing. Zero measures every
+        /// settled reading as it comes.
         public var restSeconds: TimeInterval
+        /// And how many of them, at least: the bottle reports every few seconds after
+        /// handling and a single reading is no rest.
+        public var restReadings: Int
+        /// How long a rise has to hold before it is adopted as a refill. A push reads a
+        /// refill's worth higher for as long as the hand is on it; a refill stays.
+        public var refillRestSeconds: TimeInterval
         /// How far one reading may sit from the last while the bottle still counts as
         /// resting: creep of a millilitre or two a reading passes, a step does not.
         public var restToleranceML: Double
@@ -339,7 +349,9 @@ public struct LevelTracker: Sendable {
             gapDriftMaxMLPerMinute: Double = 2.5,
             gapDriftTypicalMLPerMinute: Double = 0.5,
             offSensorForgetAfterSeconds: TimeInterval = 1800,
-            restSeconds: TimeInterval = 30,
+            restSeconds: TimeInterval = 8,
+            restReadings: Int = 3,
+            refillRestSeconds: TimeInterval = 30,
             restToleranceML: Double = 15
         ) {
             self.minDrinkML = minDrinkML
@@ -357,6 +369,8 @@ public struct LevelTracker: Sendable {
             self.gapDriftTypicalMLPerMinute = gapDriftTypicalMLPerMinute
             self.offSensorForgetAfterSeconds = offSensorForgetAfterSeconds
             self.restSeconds = restSeconds
+            self.restReadings = restReadings
+            self.refillRestSeconds = refillRestSeconds
             self.restToleranceML = restToleranceML
         }
 
@@ -366,7 +380,7 @@ public struct LevelTracker: Sendable {
             case confirmDrinkFractionOfCapacity, confirmSeconds, driftStepML
             case offSensorBelowEmptyML, offSensorMarginML
             case gapDriftBaseML, gapDriftMaxMLPerMinute, gapDriftTypicalMLPerMinute
-            case offSensorForgetAfterSeconds, restSeconds, restToleranceML
+            case offSensorForgetAfterSeconds, restSeconds, restReadings, refillRestSeconds, restToleranceML
         }
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -386,6 +400,8 @@ public struct LevelTracker: Sendable {
             gapDriftTypicalMLPerMinute = try c.decodeIfPresent(Double.self, forKey: .gapDriftTypicalMLPerMinute) ?? d.gapDriftTypicalMLPerMinute
             offSensorForgetAfterSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .offSensorForgetAfterSeconds) ?? d.offSensorForgetAfterSeconds
             restSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .restSeconds) ?? d.restSeconds
+            restReadings = try c.decodeIfPresent(Int.self, forKey: .restReadings) ?? d.restReadings
+            refillRestSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .refillRestSeconds) ?? d.refillRestSeconds
             restToleranceML = try c.decodeIfPresent(Double.self, forKey: .restToleranceML) ?? d.restToleranceML
         }
     }
@@ -418,7 +434,7 @@ public struct LevelTracker: Sendable {
     private var baselineIsProvisional = false
     /// The run of readings that have sat still: since when, and the last of them. The
     /// level is measured only once the run is `restSeconds` long.
-    private var rest: (since: Date, lastLevel: Double)?
+    private var rest: (since: Date, lastLevel: Double, count: Int)?
     /// How fast the resting reading is sinking on its own, in mL per second. Set by
     /// whoever sees the weight samples (a `CreepEstimator`): settled readings are too few
     /// to learn it from, since a creeping bottle reports every half minute and each report
@@ -496,10 +512,11 @@ public struct LevelTracker: Sendable {
         // picked straight up again reads low for a moment, and neither is water.
         if configuration.restSeconds > 0 {
             if let run = rest, abs(levelML - run.lastLevel) <= configuration.restToleranceML {
-                rest = (since: run.since, lastLevel: levelML)
-                guard date.timeIntervalSince(run.since) >= configuration.restSeconds else { return nil }
+                rest = (since: run.since, lastLevel: levelML, count: run.count + 1)
+                guard date.timeIntervalSince(run.since) >= configuration.restSeconds,
+                      run.count + 1 >= configuration.restReadings else { return nil }
             } else {
-                rest = (since: date, lastLevel: levelML)
+                rest = (since: date, lastLevel: levelML, count: 1)
                 return nil
             }
         }
@@ -586,6 +603,10 @@ public struct LevelTracker: Sendable {
         let bigJump = delta >= configuration.refillFractionOfCapacity * capacityML
         let toppedOff = base < fillLine && levelML >= fillLine && delta >= configuration.minDrinkML
         if bigJump || toppedOff {
+            // Only once it has stayed up: a hand pressing on the bottle reads exactly
+            // like this until it lets go. Until then the baseline holds, so letting go
+            // is a change of nothing.
+            if let run = rest, date.timeIntervalSince(run.since) < configuration.refillRestSeconds { return nil }
             adopt(levelML, at: date)
             return .refill(volumeML: delta, fromML: base, toML: levelML)
         }
