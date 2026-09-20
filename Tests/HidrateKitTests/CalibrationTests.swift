@@ -449,6 +449,61 @@ struct BelievedLevelTests {
         #expect(HidrateBottleModel.drink(measured, cappedAt: 9, minDrinkML: 15) == nil)
     }
 
+    /// 20 September: the bottle marked empty at noon, then every refill read small
+    /// through a drifted zero — +169 mL for a full one. The belief never climbed back,
+    /// and by mid-afternoon it cancelled a 67 mL drink measured from a bottle the scale
+    /// had resting at 295 mL. A belief that says empty where the scale says otherwise is
+    /// the thing out of step, and it restarts rather than eating the drink.
+    @Test func aBeliefThatSaysEmptyOverAFullScaleRestarts() {
+        let measured = LevelChange.drink(volumeML: 67, fromML: 295, toML: 226)
+        let (drink, restart) = HidrateBottleModel.drink(measured, believedContents: 0,
+                                                        capacityML: 621, minDrinkML: 15)
+        #expect(drink == measured, "the drink stands in full")
+        #expect(restart == 295, "the belief restarts from what the scale was holding")
+    }
+
+    /// The restart is no licence to log more than the scale saw there: a drop bigger than
+    /// the bottle was resting at is still cut down to it.
+    @Test func aRestartedBeliefStillCapsTheDrinkAtTheScale() {
+        let measured = LevelChange.drink(volumeML: 408, fromML: 331, toML: -77)
+        let (drink, restart) = HidrateBottleModel.drink(measured, believedContents: 0,
+                                                        capacityML: 621, minDrinkML: 15)
+        #expect(drink == .drink(volumeML: 331, fromML: 331, toML: -77))
+        #expect(restart == 331)
+    }
+
+    /// Where the scale agrees the bottle was empty, nothing has come out of step and the
+    /// belief still has the last word — the lift with some weight left on the sensor, and
+    /// the empty bottle set down lower, both stay nothing.
+    @Test func aBeliefTheScaleAgreesWithStillGivesNothing() {
+        for measured in [LevelChange.drink(volumeML: 507, fromML: -27, toML: -534),
+                         LevelChange.drink(volumeML: 144, fromML: -121, toML: -265)] {
+            let (drink, restart) = HidrateBottleModel.drink(measured, believedContents: 0,
+                                                            capacityML: 621, minDrinkML: 15)
+            #expect(drink == nil, "\(measured) should stay nothing")
+            #expect(restart == nil)
+        }
+    }
+
+    /// A belief with water in it is not out of step, however far the scale has drifted
+    /// above it: the cap still bites, and nothing restarts.
+    @Test func aBeliefWithWaterInItKeepsTheLastWord() {
+        let measured = LevelChange.drink(volumeML: 260, fromML: 702, toML: 441)
+        let (drink, restart) = HidrateBottleModel.drink(measured, believedContents: 169,
+                                                        capacityML: 621, minDrinkML: 15)
+        #expect(drink == .drink(volumeML: 169, fromML: 702, toML: 441))
+        #expect(restart == nil)
+    }
+
+    /// Nothing believed at all is a bottleful, as before, and no restart.
+    @Test func noBeliefIsStillABottleful() {
+        let measured = LevelChange.drink(volumeML: 200, fromML: 300, toML: 100)
+        let (drink, restart) = HidrateBottleModel.drink(measured, believedContents: nil,
+                                                        capacityML: 621, minDrinkML: 15)
+        #expect(drink == measured)
+        #expect(restart == nil)
+    }
+
     // MARK: - Putting a deleted drink back
 
     private func makeStore() -> (CalibrationStore, UserDefaults, String) {

@@ -252,7 +252,18 @@ So the app stops treating a full calibration as the fix for drift:
   down reads a full bottle as three.
 * **A drink is at most what the bottle held.** The believed level caps every drink. A
   drop past it is the zero sinking, or a hand taking some of the weight off the sensor,
-  and a bottle believed empty has nothing to give.
+  and a bottle believed empty has nothing to give — but only where the scale agrees it
+  was empty. The believed level moves only by what was measured, so a refill read small
+  through a drifted zero leaves it low, and left at nothing it cancelled every drink
+  after it: no drink was logged, so no refill was ever needed to explain one, and the
+  bottle went quiet for good with nothing in the log to say why. 20 September ran that
+  way from noon — a 67 mL drink cancelled, a 260 mL one cut to 169, a 408 mL one read as
+  the bottle off its sensor, and 5.7 oz recorded for a day of two bottles. So where the
+  scale watched water leave a bottle it had resting above empty, the belief is the
+  account out of step: the drink stands, cut down to no more than the scale said was
+  there, and the belief restarts from that. Replayed over 18–20 September, that turns
+  two logged drinks into five and 426 mL into 747, every one of them a drop the tracker
+  had already measured and then thrown away.
 * **A drink is a drop between two resting readings, less what the zero could have done
   in between.** Seconds apart in one connection, that is one interval of creep, and the
   drop is logged as it is. Across a gap — the bottle out of range for a workout, asleep
@@ -409,9 +420,10 @@ parts of the init out on the next connect, for the next such hunt.
 
 Every settled reading now gets a line in the session log when there is anything to say
 about it — the first of a session, one taken with no baseline to compare against, one
-below empty, one that was handled, or a drink cut down to what the bottle held. A drink
-that is silently dropped otherwise leaves no trace at all, which made the first real
-report of one take a log dump and a lot of arithmetic to explain.
+below empty, one that was handled, a drink cut down to what the bottle held, or one
+that caught the believed level saying empty over a scale that was not. A drink that is
+silently dropped otherwise leaves no trace at all, which made the first real report of
+one take a log dump and a lot of arithmetic to explain.
 
 Two things were dropping them. One was the attempt to reconstruct a drink taken while
 the bottle was away, from the level saved before the disconnect: its drift correction

@@ -594,12 +594,22 @@ public final class HidrateBottleModel {
         // drop past that is the zero sinking, or a hand taking some of the weight off the
         // sensor, and neither is water; a bottle believed empty has nothing to give.
         var cappedFromML: Double?
+        var beliefRestartedFromML: Double?
         if let measured = change, measured.isDrink {
-            let capped = Self.drink(measured, cappedAt: believedLevelML ?? calibration.capacityML,
-                                    minDrinkML: tracker.configuration.minDrinkML)
+            let (capped, restartsAt) = Self.drink(measured, believedContents: believedLevelML,
+                                                  capacityML: calibration.capacityML,
+                                                  minDrinkML: tracker.configuration.minDrinkML)
             if capped != measured {
                 cappedFromML = measured.volumeML
                 change = capped
+            }
+            // Before the drink is taken off it, so that what is left is what the scale
+            // now reads. Not through `resetBelievedLevel`: this is the running estimate
+            // being corrected, not the level being declared, and a drink deleted later
+            // still has its water to put back.
+            if let restartsAt, change?.isDrink == true {
+                beliefRestartedFromML = restartsAt
+                believedLevelML = restartsAt
             }
         }
         // When the drop was first seen. A drink measured across a gap — the bottle out of
@@ -618,7 +628,8 @@ public final class HidrateBottleModel {
         onSettledReading?(SettledReading(
             date: date, raw: raw, levelML: levelML, baselineBeforeML: baselineBefore,
             change: change, plausible: plausible, isFirstOfSession: wasFirst,
-            cappedFromML: cappedFromML, acrossGapSeconds: acrossGapSeconds
+            cappedFromML: cappedFromML, acrossGapSeconds: acrossGapSeconds,
+            beliefRestartedFromML: beliefRestartedFromML
         ))
 
         // Saved whatever the reading says, below empty or not: a relaunch has to pick the
@@ -649,6 +660,31 @@ public final class HidrateBottleModel {
         guard case .drink(let volume, let from, let to) = change, let contents, volume > contents else { return change }
         guard contents >= minDrinkML else { return nil }
         return .drink(volumeML: contents, fromML: from, toML: to)
+    }
+
+    /// What a measured drink comes to once the believed level has had its say, and what
+    /// that level restarts from when the drink catches it out of step.
+    ///
+    /// The belief is the better account of what the bottle holds — the scale's zero
+    /// drifts by hundreds of millilitres — but it only ever moves by what was measured,
+    /// so a refill read small leaves it low, and left at nothing it cancels every drink
+    /// after it. Nothing on this path can raise it again: no drink is logged, so no
+    /// refill is ever needed to explain one. It is a trapdoor, and it is silent.
+    ///
+    /// So the belief may call a bottle empty only where the scale agrees it was. Where
+    /// the scale watched water leave a bottle resting above empty, the belief is the
+    /// account out of step: the drink stands, cut down to no more than the scale said
+    /// was there, and the belief restarts from that.
+    nonisolated public static func drink(_ change: LevelChange, believedContents: Double?,
+                                         capacityML: Double, minDrinkML: Double)
+        -> (drink: LevelChange?, beliefRestartsAtML: Double?) {
+        guard case .drink(_, let fromML, _) = change else { return (change, nil) }
+        let believed = believedContents ?? capacityML
+        let scaleHeld = min(max(fromML, 0), capacityML)
+        guard believed < minDrinkML, scaleHeld >= minDrinkML else {
+            return (drink(change, cappedAt: believed, minDrinkML: minDrinkML), nil)
+        }
+        return (drink(change, cappedAt: scaleHeld, minDrinkML: minDrinkML), scaleHeld)
     }
 
     /// Move the believed level by what actually happened, never by what the scale says.

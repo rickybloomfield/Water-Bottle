@@ -161,10 +161,14 @@ public struct SettledReading: Sendable, Hashable {
     /// drink was measured against and this one, when it was measured across such a
     /// stretch. Nil for a drink watched between readings seconds apart.
     public var acrossGapSeconds: TimeInterval?
+    /// What the believed level was restarted from, when this drink caught it believing
+    /// the bottle empty and the scale said otherwise. Nil whenever the belief stood.
+    public var beliefRestartedFromML: Double?
 
     public init(date: Date, raw: Int, levelML: Double, baselineBeforeML: Double?,
                 change: LevelChange?, plausible: Bool, isFirstOfSession: Bool,
-                cappedFromML: Double? = nil, acrossGapSeconds: TimeInterval? = nil) {
+                cappedFromML: Double? = nil, acrossGapSeconds: TimeInterval? = nil,
+                beliefRestartedFromML: Double? = nil) {
         self.date = date
         self.raw = raw
         self.levelML = levelML
@@ -174,18 +178,23 @@ public struct SettledReading: Sendable, Hashable {
         self.isFirstOfSession = isFirstOfSession
         self.cappedFromML = cappedFromML
         self.acrossGapSeconds = acrossGapSeconds
+        self.beliefRestartedFromML = beliefRestartedFromML
     }
 
     /// One line for the session log. Only worth writing when something notable happened
     /// or could have: the rest are two-second heartbeats.
     public var logLine: String? {
         guard isFirstOfSession || baselineBeforeML == nil || !plausible
-                || change?.isHandled == true || cappedFromML != nil || acrossGapSeconds != nil else { return nil }
+                || change?.isHandled == true || cappedFromML != nil || acrossGapSeconds != nil
+                || beliefRestartedFromML != nil else { return nil }
         let baseline = baselineBeforeML.map { String(Int($0.rounded())) } ?? "none"
         let outcome = change.map { String(describing: $0) } ?? "no change"
         var line = "settled raw=\(raw) level=\(Int(levelML.rounded()))mL baseline=\(baseline) → \(outcome)"
         if !plausible { line += " [below empty]" }
         if let cappedFromML { line += " [measured \(Int(cappedFromML.rounded()))mL; only what the bottle held]" }
+        if let beliefRestartedFromML {
+            line += " [believed empty, but the scale held \(Int(beliefRestartedFromML.rounded()))mL; belief restarted]"
+        }
         if let acrossGapSeconds { line += " [across \(Int((acrossGapSeconds / 60).rounded())) min]" }
         if isFirstOfSession { line += " [first of session]" }
         return line
