@@ -24,6 +24,9 @@ struct TodayView: View {
     /// Daily totals behind the week rail's rings. Loaded once and refreshed whenever a
     /// drink lands, which is the only thing that can change them.
     @State private var dailyTotals: [Date: Double] = [:]
+    /// The bottle pushed from today's bottle row, by id. One value rather than an entry
+    /// on a path: setting it twice is still one screen.
+    @State private var openBottleID: String?
 
     /// How far back both the rail and the day pager reach.
     private static let weeksBack = 12
@@ -80,7 +83,8 @@ struct TodayView: View {
                                   onDelete: { pendingDelete = [$0] },
                                   onAdd: { addDrink = $0 },
                                   selection: $selectedItems,
-                                  scrolledUnder: $scrolledUnder)
+                                  scrolledUnder: $scrolledUnder,
+                                  onOpenBottle: { openBottleID = $0.id })
                             .containerRelativeFrame(.horizontal)
                             .id(day)
                     }
@@ -119,7 +123,9 @@ struct TodayView: View {
             .onChange(of: selectedDay) { _, _ in scrolledUnder = 0 }
             .navigationTitle(DayTimeline.label(selectedDay))
             .navigationBarTitleDisplayMode(.inline)
-            .navigationDestination(for: SavedBottle.self) { BottleDetailView(bottleID: $0.id) }
+            // Keyed by id, not by the bottle: its battery and last-connected time change
+            // while it's open, and a changed value is a different destination.
+            .navigationDestination(item: $openBottleID) { BottleDetailView(bottleID: $0) }
             .toolbar {
                 // Every day there is, a month at a time. The day rail above reaches back
                 // twelve weeks; this is how you get past that.

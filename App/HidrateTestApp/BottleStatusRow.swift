@@ -56,8 +56,8 @@ struct BottleStatusRow: View {
             }
             .lineLimit(1)
             .minimumScaleFactor(0.8)
-            // No chevron of its own: this row is the label of a NavigationLink, which
-            // draws one, and two was one too many.
+            // No chevron of its own: on Today the button that opens the bottle draws
+            // one beside this row, and where the row opens nothing it shouldn't have one.
             Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)

@@ -19,6 +19,8 @@ struct DayScreen: View {
     var selection: Binding<Set<String>> = .constant([])
     /// How far this day's drinks have scrolled up, 0…1, for whatever sits above them.
     var scrolledUnder: Binding<CGFloat> = .constant(0)
+    /// Opens the bottle from today's bottle row. Nil leaves the row as a status line.
+    var onOpenBottle: ((SavedBottle) -> Void)?
 
     @State private var items: [AppState.TodayItem] = []
     @State private var loaded = false
@@ -41,7 +43,8 @@ struct DayScreen: View {
         TodayDataView(day: day, facts: facts, items: items, loaded: loaded,
                       onOpen: onOpen, onDelete: onDelete,
                       onQuickAdd: quickAdd, onMore: { onAdd(AddDrinkRequest(day: day)) },
-                      selection: selection)
+                      selection: selection,
+                      onOpenBottle: onOpenBottle)
         .trackScrolledUnder(scrolledUnder)
         // No pull to refresh: the day reloads whenever a drink lands, when the screen
         // appears, and when the app comes forward — there was nothing left for the
