@@ -38,7 +38,7 @@ struct TodayDataView: View {
                     .listRowSeparator(.hidden)
                     .selectionDisabled()
                 // On a past day too: a glass forgotten yesterday is still a glass. There
-                // a tap asks when, rather than logging at whatever time it is now.
+                // a tap logs it at midday rather than at whatever time it is now.
                 QuickAddRow(onMore: onMore, onAdd: onQuickAdd)
                     // The section's rounded bottom corner clips whatever reaches it,
                     // which was taking a bite out of the first button. This keeps the

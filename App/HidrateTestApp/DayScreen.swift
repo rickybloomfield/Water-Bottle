@@ -12,8 +12,8 @@ struct DayScreen: View {
     let day: Date
     var onOpen: (AppState.TodayItem) -> Void
     var onDelete: (IntakeEntry) -> Void
-    /// Presents the log sheet: for an amount that isn't one of the quick ones, or — on a
-    /// past day — for the tapped amount, so the time can be asked for before it is logged.
+    /// Presents the log sheet, from the plus beside the quick amounts: for an amount that
+    /// isn't one of them, or a time that isn't the one a tap would pick.
     var onAdd: (AddDrinkRequest) -> Void = { _ in }
     /// The rows picked while selecting drinks to delete, by item id.
     var selection: Binding<Set<String>> = .constant([])
@@ -53,14 +53,17 @@ struct DayScreen: View {
         .onAppear { Task { await reload() } }
     }
 
-    /// Today, a tap logs the amount now, which is what the plus button has always done —
-    /// the only difference is that it takes one tap instead of a sheet. On a past day
-    /// "now" is nothing to go on, so the tap opens the sheet at that amount and asks when.
+    /// A tap logs the amount there and then, as the widget's buttons do; only the plus
+    /// opens the sheet. Today that is now. A past day has no "now", and it used to open the
+    /// sheet at the tapped amount to ask when — a second screen for every glass, where the
+    /// widget takes one tap. It goes in at midday instead, the same guess the sheet starts
+    /// from, and a tap on the drink moves it to the hour it was really had.
     private func quickAdd(_ ml: Double) {
         if isToday {
             app.addManual(volumeML: ml)
         } else {
-            onAdd(AddDrinkRequest(day: day, volumeML: ml))
+            let midday = Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: day) ?? day
+            app.addManual(volumeML: ml, at: midday)
         }
     }
 

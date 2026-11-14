@@ -137,7 +137,7 @@ struct TodayView: View {
             .dayDeletion(day: selectedDay, selecting: $selecting, selected: $selectedItems, pending: $pendingDelete)
             .task(id: app.entriesRevision) { dailyTotals = await app.dailyTotals(days: Self.weeksBack * 7) }
             .sheet(item: $addDrink) { request in
-                AddDrinkView(day: request.day, startingAt: request.volumeML ?? app.unit.defaultDrinkML)
+                AddDrinkView(day: request.day, startingAt: app.unit.defaultDrinkML)
             }
             .sheet(isPresented: $showDays) {
                 NavigationStack { AllDaysView(onDone: { showDays = false }) }

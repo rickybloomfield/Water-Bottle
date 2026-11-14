@@ -37,7 +37,7 @@ struct DayDetailView: View {
                 DrinkDetailView(item: item) { entry in pendingDelete = [entry] }
             }
             .sheet(item: $addDrink) { request in
-                AddDrinkView(day: request.day, startingAt: request.volumeML ?? app.unit.defaultDrinkML)
+                AddDrinkView(day: request.day, startingAt: app.unit.defaultDrinkML)
             }
     }
 }

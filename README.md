@@ -11,8 +11,10 @@ Talk to a HidrateSpark PRO water bottle directly over Bluetooth, without the off
   ripples when tapped, draining as you drink, with a celebration when you hit the goal.
   Swipe right to step back through the last month, or pick a day from the strip along the
   top; a past day drops the bottle and the connection line, which are only true of now,
-  but keeps the one-tap amounts — there a tap asks when you had the drink before logging
-  it, since the time now says nothing about a glass forgotten yesterday.
+  but keeps the one-tap amounts. A tap on one logs it at once, as the widget does — today
+  at the time it is now, and on a past day at midday, since the time now says nothing
+  about a glass forgotten yesterday; tap the drink to set when you really had it. Only
+  the plus beside them opens the sheet, for another amount or a chosen time.
   That sideways swipe is why a drink row has none of its own: delete one from the drink
   itself, or from its long-press menu — or tap Select, pick several, and delete them
   together.

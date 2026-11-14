@@ -1,12 +1,10 @@
 import HidrateKit
 import SwiftUI
 
-/// The sheet that logs a drink, asked for: on which day, and at which amount if one was
-/// tapped to get here.
+/// The sheet that logs a drink, asked for: on which day.
 struct AddDrinkRequest: Identifiable {
     let id = UUID()
     var day: Date
-    var volumeML: Double?
 }
 
 /// Deleting from a day's list: one drink from its row, or several at once after Select.
