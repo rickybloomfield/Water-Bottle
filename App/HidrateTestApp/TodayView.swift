@@ -75,27 +75,42 @@ struct TodayView: View {
             // pages would fill. This has no second view to show through, so a day is
             // simply the height of the screen and its list takes the tab bar's inset the
             // way every other list in the app does.
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: 0) {
-                    ForEach(days, id: \.self) { day in
-                        DayScreen(day: day,
-                                  onOpen: { detail = $0 },
-                                  onDelete: { pendingDelete = [$0] },
-                                  onAdd: { addDrink = $0 },
-                                  selection: $selectedItems,
-                                  scrolledUnder: $scrolledUnder,
-                                  onOpenBottle: { openBottleID = $0.id })
-                            .containerRelativeFrame(.horizontal)
-                            .id(day)
+            //
+            // Each page is as wide as the screen, not as the safe area. The iPhone Duo
+            // keeps its clock, the toolbar and the tab bar in a column down the right,
+            // and a page only as wide as the safe area ended at that column, so the
+            // column sat over the first strip of the next day. Here the pager reaches
+            // under the column and every day takes the column back as safe area of its
+            // own: its cards still stop short of it, its background runs beneath it, and
+            // the day beside it starts past the edge of the screen.
+            GeometryReader { proxy in
+                let sides = proxy.safeAreaInsets
+                ScrollView(.horizontal) {
+                    LazyHStack(spacing: 0) {
+                        ForEach(days, id: \.self) { day in
+                            DayScreen(day: day,
+                                      onOpen: { detail = $0 },
+                                      onDelete: { pendingDelete = [$0] },
+                                      onAdd: { addDrink = $0 },
+                                      selection: $selectedItems,
+                                      scrolledUnder: $scrolledUnder,
+                                      onOpenBottle: { openBottleID = $0.id })
+                                .safeAreaPadding(.leading, sides.leading)
+                                .safeAreaPadding(.trailing, sides.trailing)
+                                .containerRelativeFrame(.horizontal)
+                                .id(day)
+                        }
                     }
+                    .scrollTargetLayout()
                 }
-                .scrollTargetLayout()
+                .scrollTargetBehavior(.paging)
+                .scrollPosition(id: scrolledDay, anchor: .center)
+                // Horizontal only: scroll-indicator visibility travels down the
+                // environment, and hiding both axes took the drinks list's own scroll bar
+                // with it.
+                .scrollIndicators(.hidden, axes: .horizontal)
+                .ignoresSafeArea(.container, edges: .horizontal)
             }
-            .scrollTargetBehavior(.paging)
-            .scrollPosition(id: scrolledDay, anchor: .center)
-            // Horizontal only: scroll-indicator visibility travels down the environment,
-            // and hiding both axes took the drinks list's own scroll bar with it.
-            .scrollIndicators(.hidden, axes: .horizontal)
             // Today is the last page, and pulling past it shows whatever is behind the
             // pager. Left to itself that is the window, white in light mode against the
             // grey of the day's list; in the list's own colour the bounce reads as the

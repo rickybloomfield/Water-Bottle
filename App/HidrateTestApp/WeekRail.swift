@@ -33,24 +33,32 @@ struct WeekRail: View {
     }
 
     var body: some View {
-        ScrollView(.horizontal) {
-            LazyHStack(spacing: 0) {
-                ForEach(weeks, id: \.first) { week in
-                    HStack(spacing: 2) {
-                        ForEach(week, id: \.self) { day in
-                            column(day)
+        // A week as wide as the screen, for the same reason as a day under it: on the
+        // iPhone Duo a week only as wide as the safe area left the first ring of the next
+        // week showing beside the clock. Each week keeps clear of that column itself.
+        GeometryReader { proxy in
+            let sides = proxy.safeAreaInsets
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 0) {
+                    ForEach(weeks, id: \.first) { week in
+                        HStack(spacing: 2) {
+                            ForEach(week, id: \.self) { day in
+                                column(day)
+                            }
                         }
+                        .padding(.leading, 14 + sides.leading)
+                        .padding(.trailing, 14 + sides.trailing)
+                        .containerRelativeFrame(.horizontal)
+                        .id(week.first)
                     }
-                    .padding(.horizontal, 14)
-                    .containerRelativeFrame(.horizontal)
-                    .id(week.first)
                 }
+                .scrollTargetLayout()
             }
-            .scrollTargetLayout()
+            .scrollTargetBehavior(.paging)
+            .scrollIndicators(.hidden)
+            .scrollPosition(id: $shownWeek, anchor: .center)
+            .ignoresSafeArea(.container, edges: .horizontal)
         }
-        .scrollTargetBehavior(.paging)
-        .scrollIndicators(.hidden)
-        .scrollPosition(id: $shownWeek, anchor: .center)
         .padding(.top, 2)
         .padding(.bottom, 10)
         .frame(height: 62)
