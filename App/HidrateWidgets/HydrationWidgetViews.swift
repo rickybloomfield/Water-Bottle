@@ -25,11 +25,11 @@ struct HydrationWidgetView: View {
 
     var body: some View {
         switch family {
-        case .systemMedium: QuickAddWidgetView(snapshot: entry.snapshot)
-        case .accessoryCircular: CircularWaterView(snapshot: entry.snapshot)
+        case .systemMedium: QuickAddWidgetView(snapshot: entry.snapshot, date: entry.date)
+        case .accessoryCircular: CircularWaterView(snapshot: entry.snapshot, date: entry.date)
         case .accessoryInline: InlineWaterView(snapshot: entry.snapshot)
-        case .accessoryRectangular: RectangularWaterView(snapshot: entry.snapshot)
-        default: RingWidgetView(snapshot: entry.snapshot)
+        case .accessoryRectangular: RectangularWaterView(snapshot: entry.snapshot, date: entry.date)
+        default: RingWidgetView(snapshot: entry.snapshot, date: entry.date)
         }
     }
 }
@@ -37,10 +37,12 @@ struct HydrationWidgetView: View {
 /// Small: the day's ring, nothing else.
 struct RingWidgetView: View {
     var snapshot: HydrationSnapshot
+    /// The timeline entry's date, which is where the pace marker stands.
+    var date: Date
 
     var body: some View {
         HydrationRing(progress: snapshot.progress, overflow: snapshot.overflow,
-                      tint: snapshot.tint, paceMarker: snapshot.paceMarker()) {
+                      tint: snapshot.tint, paceMarker: snapshot.paceMarker(at: date)) {
             HydrationRingLabel(snapshot: snapshot, numberSize: 36, goalSize: 13)
         }
         .padding(14)
@@ -52,6 +54,8 @@ struct RingWidgetView: View {
 /// Medium: the ring, and the four everyday amounts. One tap logs.
 struct QuickAddWidgetView: View {
     var snapshot: HydrationSnapshot
+    /// The timeline entry's date, which is where the pace marker stands.
+    var date: Date
 
     var body: some View {
         // One gap, used three times: left of the ring, between the ring and the amounts,
@@ -60,7 +64,7 @@ struct QuickAddWidgetView: View {
         // centres inside it, quietly widening the outer two.
         HStack(spacing: Self.gap) {
             HydrationRing(progress: snapshot.progress, overflow: snapshot.overflow,
-                          tint: snapshot.tint, paceMarker: snapshot.paceMarker()) {
+                          tint: snapshot.tint, paceMarker: snapshot.paceMarker(at: date)) {
                 HydrationRingLabel(snapshot: snapshot, numberSize: 26, goalSize: 11)
             }
             .frame(width: 124, height: 124)

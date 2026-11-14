@@ -51,9 +51,14 @@ struct WatchTodayView: View {
     /// drink under it. The drinks scroll up from beneath.
     private var header: some View {
         VStack(spacing: 8) {
-            HydrationRing(progress: snapshot.progress, overflow: snapshot.overflow,
-                          tint: snapshot.tint, paceMarker: snapshot.paceMarker()) {
-                HydrationRingLabel(snapshot: snapshot, numberSize: 26, goalSize: 11)
+            // Redrawn on the minute, which is as finely as the pace is worked out. Drawn only
+            // when the snapshot changed, the marker stood where the last drink left it for
+            // as long as the app stayed open.
+            TimelineView(.everyMinute) { context in
+                HydrationRing(progress: snapshot.progress, overflow: snapshot.overflow,
+                              tint: snapshot.tint, paceMarker: snapshot.paceMarker(at: context.date)) {
+                    HydrationRingLabel(snapshot: snapshot, numberSize: 26, goalSize: 11)
+                }
             }
             .frame(maxWidth: 104)
             .animation(.spring(duration: 0.5), value: snapshot.totalML)

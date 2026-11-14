@@ -62,12 +62,39 @@ struct HydrationSnapshot: Codable, Hashable, Sendable {
         return short > 0 ? short : nil
     }
 
-    /// Where the pace marker sits on the ring, or nil when there is nothing useful to
-    /// mark: the window hasn't opened, it has closed, or the goal is already in.
-    func paceMarker(at date: Date = Date()) -> Double? {
+    /// Where the pace marker sits on the ring at `date`, or nil when there is nothing useful
+    /// to mark: the window hasn't opened, it has closed, or the goal is already in.
+    ///
+    /// No default of now. A widget is drawn whenever WidgetKit gets round to it, so it asks
+    /// for its entry's date, and the watch app asks for the minute its clock is showing.
+    func paceMarker(at date: Date) -> Double? {
         guard !goalReached else { return nil }
         let fraction = paceFraction(at: date)
         return fraction > 0 && fraction < 1 ? fraction : nil
+    }
+
+    /// The moments after `start`, up to and including `end`, at which the marker moves: every
+    /// hundredth of the drinking window from when it opens, though never more often than
+    /// every five minutes, and the moment it closes, where the marker goes away. A step of a
+    /// hundredth is the same 3.6° round the ring however long the window is; for the default
+    /// 8 AM to 9 PM it comes every 8 minutes.
+    func paceChanges(after start: Date, through end: Date, calendar: Calendar = .current) -> [Date] {
+        guard windowEnd > windowStart, end > start else { return [] }
+        let step = max(5, Int((Double(windowEnd - windowStart) / 100).rounded(.up)))
+        let moves = Array(stride(from: windowStart + step, to: windowEnd, by: step)) + [windowEnd]
+
+        var changes: [Date] = []
+        var day = calendar.startOfDay(for: start)
+        while day <= end {
+            for minutes in moves {
+                guard let date = calendar.date(bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: day),
+                      date > start, date <= end else { continue }
+                changes.append(date)
+            }
+            guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
+            day = next
+        }
+        return changes
     }
 
     /// Everything the widget, the watch and the complication actually draw. Publishing is

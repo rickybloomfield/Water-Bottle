@@ -35,6 +35,17 @@ struct TodayFacts {
 
     var isAhead: Bool { (offPaceML ?? 0) >= 0 }
 
+    /// The same day as it stands at `date`. What has been drunk changes only when a drink is
+    /// logged, but where the pace says you should be moves with the clock, so a screen left
+    /// open asks for this again as the minutes pass.
+    func paced(at date: Date) -> TodayFacts {
+        var facts = self
+        facts.paceFraction = ReminderSettings(startMinutes: windowStartMinutes, endMinutes: windowEndMinutes)
+            .paceFraction(at: date)
+        facts.paceTargetML = goalML * facts.paceFraction
+        return facts
+    }
+
     /// Where the window closes, for "26 oz to go by 9 PM".
     var windowEnd: Date { ReminderSettings.date(minutes: windowEndMinutes) }
     var windowStart: Date { ReminderSettings.date(minutes: windowStartMinutes) }

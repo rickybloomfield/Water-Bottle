@@ -107,12 +107,22 @@ struct TodayDataView: View {
 
     // MARK: - Pace
 
-    @ViewBuilder private var paceBlock: some View {
+    /// Redrawn on the minute, which is as finely as the pace is worked out. The tick, the
+    /// line saying how far ahead or behind, and "now" all move with the clock; drawn only
+    /// when a drink changed the day, they stayed where the last one left them for as long
+    /// as the screen was open.
+    private var paceBlock: some View {
+        TimelineView(.everyMinute) { context in
+            pace(isToday ? facts.paced(at: context.date) : facts, now: context.date)
+        }
+    }
+
+    private func pace(_ facts: TodayFacts, now: Date) -> some View {
         VStack(spacing: 0) {
             HStack(alignment: .firstTextBaseline) {
-                Text(paceHeadline)
+                Text(paceHeadline(facts))
                     .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(paceTint)
+                    .foregroundStyle(paceTint(facts))
                 Spacer(minLength: 8)
                 if !facts.reached {
                     Text("\(app.volume(facts.remainingML)) to go")
@@ -134,7 +144,7 @@ struct TodayDataView: View {
                 HStack {
                     Text(Self.hourLabel(facts.windowStart))
                     Spacer()
-                    Text("now \(Date().formatted(date: .omitted, time: .shortened))")
+                    Text("now \(now.formatted(date: .omitted, time: .shortened))")
                     Spacer()
                     Text(Self.hourLabel(facts.windowEnd))
                 }
@@ -145,7 +155,7 @@ struct TodayDataView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Water")
-        .accessibilityValue("\(app.volume(facts.totalML)) of a \(app.volume(facts.goalML)) goal. \(paceHeadline)")
+        .accessibilityValue("\(app.volume(facts.totalML)) of a \(app.volume(facts.goalML)) goal. \(paceHeadline(facts))")
     }
 
     /// The ends of the drinking window read as hours — "8 AM" rather than "8:00 AM" —
@@ -158,7 +168,7 @@ struct TodayDataView: View {
 
     /// What the day is doing, in the fewest words that are still true: ahead or behind
     /// while the window is open, and simply done once the goal is in.
-    private var paceHeadline: String {
+    private func paceHeadline(_ facts: TodayFacts) -> String {
         if facts.reached { return "Goal reached" }
         guard isToday, let off = facts.offPaceML else {
             return "\(app.volume(facts.totalML)) of \(app.volume(facts.goalML))"
@@ -167,7 +177,7 @@ struct TodayDataView: View {
         return off >= 0 ? "\(amount) ahead of pace" : "\(amount) behind pace"
     }
 
-    private var paceTint: Color {
+    private func paceTint(_ facts: TodayFacts) -> Color {
         if facts.reached { return .green }
         guard isToday, let off = facts.offPaceML else { return .secondary }
         return off >= 0 ? .green : .orange

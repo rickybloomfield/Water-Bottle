@@ -5,8 +5,10 @@ struct HydrationEntry: TimelineEntry {
     var snapshot: HydrationSnapshot
 }
 
-/// Reads whatever the app last published. The app reloads timelines on every change, so
-/// the only scheduled refresh this needs is midnight, when today's total goes back to zero.
+/// Reads whatever the app last published. The app reloads timelines on every change; what
+/// changes without it is the clock, which moves the pace marker round the ring through the
+/// day and takes today's total back to zero at midnight, so both are written into the
+/// timeline ahead of time.
 struct HydrationProvider: TimelineProvider {
     func placeholder(in context: Context) -> HydrationEntry {
         DiagnosticLog.write("placeholder family=\(context.family)")
@@ -48,9 +50,23 @@ struct HydrationProvider: TimelineProvider {
         rolledOver.drinks = []
         entries.append(HydrationEntry(date: midnight, snapshot: rolledOver))
 
+        // And one each time the pace marker moves, for a day ahead, for the same reason.
+        // The marker was drawn where it stood when the timeline was made, and the one thing
+        // that reliably brought a new timeline was a drink, so between drinks it sat still
+        // and then jumped. A day ahead is never more than one window's worth of entries,
+        // and every reload starts it again from now.
+        let paceChanges = snapshot.paceChanges(after: now, through: now.addingTimeInterval(24 * 3600))
+        for date in paceChanges {
+            let shown = date < midnight ? snapshot : rolledOver
+            // With the goal in there is no marker until tomorrow, so nothing to move.
+            if shown.goalReached { continue }
+            entries.append(HydrationEntry(date: date, snapshot: shown))
+        }
+        entries.sort { $0.date < $1.date }
+
         // The hourly wake is a safety net for the days the app never gets to run.
         let next = min(midnight, now.addingTimeInterval(3600))
-        DiagnosticLog.write("getTimeline done family=\(context.family) stored=[\(stored.summary)] showing=[\(snapshot.summary)] pending=\(HydrationStore.pendingDrinks().count) rollover=\(DiagnosticLog.stamp(midnight)) next=\(DiagnosticLog.stamp(next))")
+        DiagnosticLog.write("getTimeline done family=\(context.family) stored=[\(stored.summary)] showing=[\(snapshot.summary)] pending=\(HydrationStore.pendingDrinks().count) rollover=\(DiagnosticLog.stamp(midnight)) entries=\(entries.count) next=\(DiagnosticLog.stamp(next))")
         completion(Timeline(entries: entries, policy: .after(next)))
     }
 }

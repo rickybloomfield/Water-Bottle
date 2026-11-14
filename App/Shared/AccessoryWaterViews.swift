@@ -6,6 +6,8 @@ import WidgetKit
 /// decides how big it is.
 struct WaterRingView: View {
     var snapshot: HydrationSnapshot
+    /// The timeline entry's date, which is where the pace marker stands.
+    var date: Date
 
     var body: some View {
         // Drawn rather than left to a Gauge, so the ring carries the app's colour and the
@@ -16,7 +18,7 @@ struct WaterRingView: View {
             HydrationRing(progress: snapshot.progress,
                           overflow: snapshot.overflow,
                           tint: snapshot.tint,
-                          paceMarker: snapshot.paceMarker(),
+                          paceMarker: snapshot.paceMarker(at: date),
                           // Measured off a photograph of a real watch face: every system
                           // complication on it is a 45pt circle with a 5pt stroke.
                           thickness: 5.0 / 45.0) {
@@ -66,12 +68,13 @@ struct WaterRingView: View {
 /// app, and measuring the app's is what got this wrong twice.
 struct CircularWaterView: View {
     var snapshot: HydrationSnapshot
+    var date: Date
 
     var body: some View {
         Gauge(value: 0) { Image(systemName: "drop.fill") }
             .gaugeStyle(.accessoryCircularCapacity)
             .hidden()
-            .overlay { WaterRingView(snapshot: snapshot) }
+            .overlay { WaterRingView(snapshot: snapshot, date: date) }
     }
 }
 
@@ -85,12 +88,13 @@ struct InlineWaterView: View {
 
 struct RectangularWaterView: View {
     var snapshot: HydrationSnapshot
+    var date: Date
 
     var body: some View {
         HStack(spacing: 8) {
             // Sized by the row it sits in rather than by the system gauge, which is a
             // circular slot's size and far too big for a line of text.
-            WaterRingView(snapshot: snapshot)
+            WaterRingView(snapshot: snapshot, date: date)
                 .frame(width: 44, height: 44)
             // No room for a title here — the face already says which complication this is.
             VStack(alignment: .leading, spacing: 1) {

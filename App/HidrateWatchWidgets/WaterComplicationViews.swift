@@ -10,9 +10,9 @@ struct WaterComplicationView: View {
     var body: some View {
         switch family {
         case .accessoryCorner: CornerWaterView(snapshot: entry.snapshot)
-        case .accessoryRectangular: RectangularWaterView(snapshot: entry.snapshot)
+        case .accessoryRectangular: RectangularWaterView(snapshot: entry.snapshot, date: entry.date)
         case .accessoryInline: InlineWaterView(snapshot: entry.snapshot)
-        default: CircularWaterView(snapshot: entry.snapshot)
+        default: CircularWaterView(snapshot: entry.snapshot, date: entry.date)
         }
     }
 }

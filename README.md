@@ -106,7 +106,11 @@ colour: a difference in brightness survives that, a difference in hue does not.
 
 Every ring carries a tick showing where the day's pace says you should be by
 now, spread evenly across the drink window from the reminder settings — ahead of the tick
-you're on track, behind it you're falling back. The complication has no room for a unit, so it shows
+you're on track, behind it you're falling back. The tick keeps time on its own rather than
+moving only when a drink is logged: the widget and the complication carry a timeline entry
+for each step it takes (a hundredth of the window, and never more often than every five
+minutes), and the watch app and the phone's Today screen redraw it on the minute while
+they're open. The complication has no room for a unit, so it shows
 the number alone; whether that number is ounces or millilitres follows the app's setting. The phone spends a budgeted
 complication transfer only when the number on the face would actually change.
 
@@ -170,8 +174,10 @@ writes whether it began in the foreground — someone tapped the icon — or the
 which is the system's doing, so the log can say whether CoreBluetooth is relaunching the
 app for the bottle at all.
 
-The widget's timeline asks to be woken hourly and exactly at midnight — midnight so it
-never shows yesterday's number, hourly as a safety net for a day when the app never runs.
+The widget's timeline asks to be woken hourly and at midnight, but a wake is only a
+request, and a watch face runs out of them. So nothing the clock alone changes waits on
+one: the midnight rollover and a day of pace-tick positions are already entries in the
+timeline, and the hourly wake is a safety net for a day when the app never runs.
 
 ## More than one bottle
 
