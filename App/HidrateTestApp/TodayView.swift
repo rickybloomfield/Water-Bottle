@@ -89,15 +89,16 @@ struct TodayView: View {
             ScrollView(.horizontal) {
                 LazyHStack(spacing: 0) {
                     ForEach(days, id: \.self) { day in
-                        DayScreen(day: day,
-                                  onOpen: { detail = $0 },
-                                  onDelete: { pendingDelete = [$0] },
-                                  onAdd: { addDrink = $0 },
-                                  selection: $selectedItems,
-                                  scrolledUnder: $scrolledUnder,
-                                  onOpenBottle: { openBottleID = $0.id })
-                            .safeAreaPadding(.leading, sideInsets.leading)
-                            .safeAreaPadding(.trailing, sideInsets.trailing)
+                        PagedDay(day: day,
+                                 sideInsets: sideInsets,
+                                 picked: day == selectedDay ? selectedItems : [],
+                                 selection: $selectedItems,
+                                 scrolledUnder: $scrolledUnder,
+                                 onOpen: { detail = $0 },
+                                 onDelete: { pendingDelete = [$0] },
+                                 onAdd: { addDrink = $0 },
+                                 onOpenBottle: { openBottleID = $0.id })
+                            .equatable()
                             .containerRelativeFrame(.horizontal)
                             .id(day)
                     }
@@ -180,5 +181,46 @@ struct TodayView: View {
                 Button("OK", role: .cancel) {}
             } message: { Text(app.lastError ?? "") }
         }
+    }
+}
+
+/// One day in the Today tab's pager, compared by what it shows: the day, the room it
+/// leaves for the side column, and the drinks picked on it for deleting. The pager holds
+/// every day it reaches, not only the one on screen, and each of them took its actions as
+/// closures, which never compare equal — so anything that redrew the Today tab redrew all
+/// of them too. Swiping to another day is one of those things, and rebuilding the whole
+/// pager as each swipe landed was the hitch at the end of it. A day still follows its own
+/// drinks and the list's edit mode directly.
+private struct PagedDay: View, Equatable {
+    let day: Date
+    let sideInsets: EdgeInsets
+    /// The drinks picked on this day, and none on any other. A day that isn't redrawn
+    /// keeps the selection binding it was built with, and a binding only reads back what
+    /// it held when its view was last updated — so without this a tick wouldn't stick.
+    /// Only the day being looked at can have any, so picking redraws that day alone.
+    let picked: Set<String>
+    var selection: Binding<Set<String>>
+    var scrolledUnder: Binding<CGFloat>
+    var onOpen: (AppState.TodayItem) -> Void
+    var onDelete: (IntakeEntry) -> Void
+    var onAdd: (AddDrinkRequest) -> Void
+    var onOpenBottle: (SavedBottle) -> Void
+
+    /// The actions only ever set the Today tab's state, which stays put however many
+    /// times the tab is redrawn, so a day built earlier keeps working with its own.
+    nonisolated static func == (lhs: PagedDay, rhs: PagedDay) -> Bool {
+        lhs.day == rhs.day && lhs.sideInsets == rhs.sideInsets && lhs.picked == rhs.picked
+    }
+
+    var body: some View {
+        DayScreen(day: day,
+                  onOpen: onOpen,
+                  onDelete: onDelete,
+                  onAdd: onAdd,
+                  selection: selection,
+                  scrolledUnder: scrolledUnder,
+                  onOpenBottle: onOpenBottle)
+            .safeAreaPadding(.leading, sideInsets.leading)
+            .safeAreaPadding(.trailing, sideInsets.trailing)
     }
 }

@@ -648,7 +648,7 @@ final class AppState {
         todayEntries.reduce(0) { $0 + $1.volumeML } + externalTodaySamples.reduce(0) { $0 + $1.milliliters }
     }
 
-    enum TodayItem: Identifiable {
+    enum TodayItem: Identifiable, Equatable {
         case entry(IntakeEntry)
         case health(WaterSample)
 

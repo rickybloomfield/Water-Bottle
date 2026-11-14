@@ -67,8 +67,12 @@ struct DayScreen: View {
         }
     }
 
+    /// Only a day whose drinks changed is redrawn. A day reloads each time it comes on
+    /// screen, so swiping to one already loaded reads the same drinks back, and handing
+    /// them to the list again could redraw it while the swipe was still settling.
     private func reload() async {
-        items = await app.items(on: day)
-        loaded = true
+        let fresh = await app.items(on: day)
+        if fresh != items { items = fresh }
+        if !loaded { loaded = true }
     }
 }
