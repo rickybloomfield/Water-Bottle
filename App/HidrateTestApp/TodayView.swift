@@ -27,6 +27,9 @@ struct TodayView: View {
     /// The bottle opened from today's bottle row, by id. One value rather than an entry
     /// appended to the stack, so however the row is tapped it is one screen.
     @State private var openBottleID: String?
+    /// The safe area at the left and right of the screen — on the iPhone Duo, the column
+    /// down the right — which each day in the pager keeps clear of itself.
+    @State private var sideInsets = EdgeInsets()
 
     /// How far back both the rail and the day pager reach.
     private static let weeksBack = 12
@@ -83,34 +86,38 @@ struct TodayView: View {
             // under the column and every day takes the column back as safe area of its
             // own: its cards still stop short of it, its background runs beneath it, and
             // the day beside it starts past the edge of the screen.
-            GeometryReader { proxy in
-                let sides = proxy.safeAreaInsets
-                ScrollView(.horizontal) {
-                    LazyHStack(spacing: 0) {
-                        ForEach(days, id: \.self) { day in
-                            DayScreen(day: day,
-                                      onOpen: { detail = $0 },
-                                      onDelete: { pendingDelete = [$0] },
-                                      onAdd: { addDrink = $0 },
-                                      selection: $selectedItems,
-                                      scrolledUnder: $scrolledUnder,
-                                      onOpenBottle: { openBottleID = $0.id })
-                                .safeAreaPadding(.leading, sides.leading)
-                                .safeAreaPadding(.trailing, sides.trailing)
-                                .containerRelativeFrame(.horizontal)
-                                .id(day)
-                        }
+            ScrollView(.horizontal) {
+                LazyHStack(spacing: 0) {
+                    ForEach(days, id: \.self) { day in
+                        DayScreen(day: day,
+                                  onOpen: { detail = $0 },
+                                  onDelete: { pendingDelete = [$0] },
+                                  onAdd: { addDrink = $0 },
+                                  selection: $selectedItems,
+                                  scrolledUnder: $scrolledUnder,
+                                  onOpenBottle: { openBottleID = $0.id })
+                            .safeAreaPadding(.leading, sideInsets.leading)
+                            .safeAreaPadding(.trailing, sideInsets.trailing)
+                            .containerRelativeFrame(.horizontal)
+                            .id(day)
                     }
-                    .scrollTargetLayout()
                 }
-                .scrollTargetBehavior(.paging)
-                .scrollPosition(id: scrolledDay, anchor: .center)
-                // Horizontal only: scroll-indicator visibility travels down the
-                // environment, and hiding both axes took the drinks list's own scroll bar
-                // with it.
-                .scrollIndicators(.hidden, axes: .horizontal)
-                .ignoresSafeArea(.container, edges: .horizontal)
+                .scrollTargetLayout()
             }
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: scrolledDay, anchor: .center)
+            // Horizontal only: scroll-indicator visibility travels down the environment,
+            // and hiding both axes took the drinks list's own scroll bar with it.
+            .scrollIndicators(.hidden, axes: .horizontal)
+            .ignoresSafeArea(.container, edges: .horizontal)
+            // Only the sides, and only when they change. The top of the safe area moves
+            // with every frame of a vertical scroll on the Duo, as the bar over the day
+            // shrinks and grows; reading the whole of it rebuilt every day in the pager on
+            // each of those frames, and the scroll stuttered.
+            .onGeometryChange(for: EdgeInsets.self) { proxy in
+                EdgeInsets(top: 0, leading: proxy.safeAreaInsets.leading,
+                           bottom: 0, trailing: proxy.safeAreaInsets.trailing)
+            } action: { sideInsets = $0 }
             // Today is the last page, and pulling past it shows whatever is behind the
             // pager. Left to itself that is the window, white in light mode against the
             // grey of the day's list; in the list's own colour the bounce reads as the
@@ -132,7 +139,7 @@ struct TodayView: View {
                          onPick: { day in
                              withAnimation(.snappy) { selectedDay = Calendar.current.startOfDay(for: day) }
                          },
-                         scrolledUnder: scrolledUnder)
+                         scrolledUnder: $scrolledUnder)
             }
             // A day arrived at is at its top; only scrolling moves it from there.
             .onChange(of: selectedDay) { _, _ in scrolledUnder = 0 }

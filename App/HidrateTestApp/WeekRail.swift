@@ -17,11 +17,16 @@ struct WeekRail: View {
     @Binding var selected: Date
     var onPick: (Date) -> Void
     /// 0…1 as the day's drinks scroll up beneath, which fades in the line under the rail.
-    var scrolledUnder: CGFloat = 0
+    /// A binding, read only by the line itself: it changes on every frame of the first
+    /// few points of a scroll, and read by the screen around the rail it redrew every day
+    /// in the pager on each of those frames.
+    var scrolledUnder: Binding<CGFloat> = .constant(0)
 
     /// Which week is on screen. Kept apart from `selected` so paging the rail and paging
     /// the day underneath can each drive the other without chasing their own tail.
     @State private var shownWeek: Date?
+    /// The safe area at the left and right of the screen, which each week keeps clear of.
+    @State private var sideInsets = EdgeInsets()
 
     private var calendar: Calendar { .current }
 
@@ -36,29 +41,32 @@ struct WeekRail: View {
         // A week as wide as the screen, for the same reason as a day under it: on the
         // iPhone Duo a week only as wide as the safe area left the first ring of the next
         // week showing beside the clock. Each week keeps clear of that column itself.
-        GeometryReader { proxy in
-            let sides = proxy.safeAreaInsets
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: 0) {
-                    ForEach(weeks, id: \.first) { week in
-                        HStack(spacing: 2) {
-                            ForEach(week, id: \.self) { day in
-                                column(day)
-                            }
+        ScrollView(.horizontal) {
+            LazyHStack(spacing: 0) {
+                ForEach(weeks, id: \.first) { week in
+                    HStack(spacing: 2) {
+                        ForEach(week, id: \.self) { day in
+                            column(day)
                         }
-                        .padding(.leading, 14 + sides.leading)
-                        .padding(.trailing, 14 + sides.trailing)
-                        .containerRelativeFrame(.horizontal)
-                        .id(week.first)
                     }
+                    .padding(.leading, 14 + sideInsets.leading)
+                    .padding(.trailing, 14 + sideInsets.trailing)
+                    .containerRelativeFrame(.horizontal)
+                    .id(week.first)
                 }
-                .scrollTargetLayout()
             }
-            .scrollTargetBehavior(.paging)
-            .scrollIndicators(.hidden)
-            .scrollPosition(id: $shownWeek, anchor: .center)
-            .ignoresSafeArea(.container, edges: .horizontal)
+            .scrollTargetLayout()
         }
+        .scrollTargetBehavior(.paging)
+        .scrollIndicators(.hidden)
+        .scrollPosition(id: $shownWeek, anchor: .center)
+        .ignoresSafeArea(.container, edges: .horizontal)
+        // The sides alone, as the day pager reads them: the rest of the safe area moves
+        // while the day underneath scrolls, and none of that should redraw the weeks.
+        .onGeometryChange(for: EdgeInsets.self) { proxy in
+            EdgeInsets(top: 0, leading: proxy.safeAreaInsets.leading,
+                       bottom: 0, trailing: proxy.safeAreaInsets.trailing)
+        } action: { sideInsets = $0 }
         .padding(.top, 2)
         .padding(.bottom, 10)
         .frame(height: 62)
@@ -66,13 +74,7 @@ struct WeekRail: View {
         // material of its own: two materials over different things do not match, which
         // is what left a seam between the rail and the bar above it.
         .background(Color(.systemBackground))
-        .overlay(alignment: .bottom) {
-            LinearGradient(colors: [.black.opacity(0.12 * scrolledUnder), .clear],
-                           startPoint: .top, endPoint: .bottom)
-                .frame(height: 7)
-                .offset(y: 7)
-                .allowsHitTesting(false)
-        }
+        .overlay(alignment: .bottom) { ScrolledUnderLine(amount: scrolledUnder) }
         .onAppear { shownWeek = weekOfSelection }
         // Swiping the days underneath into another week brings the rail along.
         .onChange(of: selected) { _, _ in
@@ -144,5 +146,19 @@ struct WeekRail: View {
         let symbols = calendar.veryShortWeekdaySymbols
         let index = calendar.component(.weekday, from: day) - 1
         return symbols.indices.contains(index) ? symbols[index] : ""
+    }
+}
+
+/// The line under the rail, darker the further the day's drinks have scrolled beneath it.
+/// Its own view so that a scroll redraws the line and nothing else.
+private struct ScrolledUnderLine: View {
+    @Binding var amount: CGFloat
+
+    var body: some View {
+        LinearGradient(colors: [.black.opacity(0.12 * amount), .clear],
+                       startPoint: .top, endPoint: .bottom)
+            .frame(height: 7)
+            .offset(y: 7)
+            .allowsHitTesting(false)
     }
 }
