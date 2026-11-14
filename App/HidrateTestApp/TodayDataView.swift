@@ -20,6 +20,10 @@ struct TodayDataView: View {
     var onMore: () -> Void
     /// The rows picked while selecting, by item id.
     var selection: Binding<Set<String>> = .constant([])
+    /// Opens the bottle from the row under the pace rail. Nil where the screen around this
+    /// one has no bottle screen to open — a day opened from Progress — and the row is then
+    /// only a status line.
+    var onOpenBottle: ((SavedBottle) -> Void)?
 
     private var isToday: Bool { Calendar.current.isDateInToday(day) }
 
@@ -171,10 +175,24 @@ struct TodayDataView: View {
 
     // MARK: - Bottle
 
+    /// A button that says which bottle, and the screen around this one does the push. It
+    /// was a `NavigationLink`, and a link anywhere in a list row makes the whole row the
+    /// link: a tap on the total or the pace rail opened the bottle too. Once the list could
+    /// select rows, for deleting several drinks at once, that row pushed the bottle twice
+    /// for one tap, and it took two Backs to get home.
     @ViewBuilder private var bottleRow: some View {
-        if let bottle = app.activeBottle {
-            NavigationLink(value: bottle) {
-                BottleStatusRow(lastDrink: items.first?.date)
+        if let bottle = app.activeBottle, let onOpenBottle {
+            Button { onOpenBottle(bottle) } label: {
+                HStack(spacing: 8) {
+                    BottleStatusRow(lastDrink: items.first?.date)
+                    // The link drew this for itself; a button doesn't.
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
+                }
+                // The gap the row's spacer leaves is part of the button too.
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         } else {
